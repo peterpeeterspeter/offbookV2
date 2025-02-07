@@ -1,0 +1,18 @@
+{
+    "backups": [
+        {
+            "timestamp": "20250129_104021",
+            "description": "Description of changes",
+            "changed_files": [],
+            "status": "success"
+        },
+        {
+            "timestamp": "20250207_121333",
+            "description": "Pre-commit backup",
+            "changed_files": [],
+            "status": "success"
+        }
+    ],
+    "last_backup": "20250207_121333",
+    "total_backups": 2
+}
