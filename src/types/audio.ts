@@ -1,77 +1,140 @@
-// Error recovery hints
-export const ERROR_RECOVERY_HINTS: Record<AudioServiceErrorType, string> = {
-  INITIALIZATION_FAILED: 'Check your audio device connections and browser permissions. Try refreshing the page or using a different browser.',
-  TTS_INITIALIZATION_FAILED: 'Verify your internet connection and API key. If the issue persists, try again in a few minutes.',
-  RECORDING_FAILED: 'Check your microphone settings and permissions. Make sure no other application is using the microphone.',
-  PROCESSING_FAILED: 'Try speaking more clearly and reducing background noise. If the issue persists, try lowering audio quality settings.',
-  CLEANUP_FAILED: 'Refresh the page to reset audio resources. If issues continue, try clearing browser cache or restarting the browser.',
-  VAD_FAILED: 'Adjust microphone sensitivity or try using a different microphone. Ensure stable audio input levels.',
-  NETWORK_TIMEOUT: 'Check your internet connection speed and stability. Try again with a stronger connection or reduced quality settings.'
-};
+export enum AudioServiceState {
+  UNINITIALIZED = 'UNINITIALIZED',
+  INITIALIZING = 'INITIALIZING',
+  READY = 'READY',
+  RECORDING = 'RECORDING',
+  ERROR = 'ERROR'
+}
 
-export enum AudioServiceErrorType {
+export enum AudioServiceEvent {
+  INITIALIZE = 'INITIALIZE',
+  INITIALIZED = 'INITIALIZED',
+  RECORDING_START = 'RECORDING_START',
+  RECORDING_STOP = 'RECORDING_STOP',
+  VAD_UPDATE = 'VAD_UPDATE',
+  ERROR = 'ERROR',
+  CLEANUP = 'CLEANUP'
+}
+
+export enum AudioServiceError {
   INITIALIZATION_FAILED = 'INITIALIZATION_FAILED',
-  RECORDING_FAILED = 'RECORDING_FAILED',
-  PLAYBACK_FAILED = 'PLAYBACK_FAILED',
-  INVALID_STATE = 'INVALID_STATE',
-  PERMISSION_DENIED = 'PERMISSION_DENIED',
-  DEVICE_NOT_FOUND = 'DEVICE_NOT_FOUND',
-  NETWORK_ERROR = 'NETWORK_ERROR',
-  API_ERROR = 'API_ERROR',
   TTS_INITIALIZATION_FAILED = 'TTS_INITIALIZATION_FAILED',
+  RECORDING_FAILED = 'RECORDING_FAILED',
+  CLEANUP_FAILED = 'CLEANUP_FAILED',
+  PROCESSING_FAILED = 'PROCESSING_FAILED',
+  VAD_FAILED = 'VAD_FAILED',
   NETWORK_TIMEOUT = 'NETWORK_TIMEOUT'
 }
 
-export const ERROR_MESSAGES: Record<AudioServiceErrorType, string> = {
-  [AudioServiceErrorType.INITIALIZATION_FAILED]: 'Failed to initialize audio service. Please check your audio settings and try again.',
-  [AudioServiceErrorType.RECORDING_FAILED]: 'Failed to start recording. Please check your microphone permissions and try again.',
-  [AudioServiceErrorType.PLAYBACK_FAILED]: 'Failed to play audio. Please check your audio output settings.',
-  [AudioServiceErrorType.INVALID_STATE]: 'Invalid operation for current state. Please try again.',
-  [AudioServiceErrorType.PERMISSION_DENIED]: 'Microphone access denied. Please grant microphone permissions to use this feature.',
-  [AudioServiceErrorType.DEVICE_NOT_FOUND]: 'No audio input device found. Please connect a microphone and try again.',
-  [AudioServiceErrorType.NETWORK_ERROR]: 'Network error occurred. Please check your internet connection.',
-  [AudioServiceErrorType.API_ERROR]: 'API error occurred. Please try again later.',
-  [AudioServiceErrorType.TTS_INITIALIZATION_FAILED]: 'Failed to initialize text-to-speech service. Please check your API key and try again.',
-  [AudioServiceErrorType.NETWORK_TIMEOUT]: 'Network timeout. Please check your internet connection speed and stability.'
+export enum AudioErrorCategory {
+  INITIALIZATION = 'INITIALIZATION',
+  RECORDING = 'RECORDING',
+  PROCESSING = 'PROCESSING',
+  NETWORK = 'NETWORK',
+  CLEANUP = 'CLEANUP'
+}
+
+export interface AudioConfig {
+  sampleRate: number;
+  channels: number;
+  bitDepth: number;
+}
+
+export interface RecordingSession {
+  id: string;
+  startTime: number;
+  duration: number;
+  audioData: Float32Array;
+}
+
+export interface TTSConfig {
+  voice: string;
+  speed: number;
+  pitch: number;
+  volume: number;
+}
+
+export interface AudioServiceStateData {
+  state: AudioServiceState;
+  error?: AudioServiceError;
+  context?: AudioContext;
+  session?: RecordingSession;
+}
+
+export interface CueSignal {
+  type: 'start' | 'stop';
+  timestamp: number;
+}
+
+export interface CueDisplay {
+  text: string;
+  duration: number;
+  emotion?: string;
+}
+
+export interface SceneProgression {
+  currentScene: number;
+  totalScenes: number;
+  progress: number;
+}
+
+// Error recovery hints
+export const ERROR_RECOVERY_HINTS: Record<AudioServiceError, string> = {
+  [AudioServiceError.INITIALIZATION_FAILED]: 'Check your audio device connections and browser permissions. Try refreshing the page or using a different browser.',
+  [AudioServiceError.TTS_INITIALIZATION_FAILED]: 'Verify your internet connection and API key. If the issue persists, try again in a few minutes.',
+  [AudioServiceError.RECORDING_FAILED]: 'Check your microphone settings and permissions. Make sure no other application is using the microphone.',
+  [AudioServiceError.PROCESSING_FAILED]: 'Try speaking more clearly and reducing background noise. If the issue persists, try lowering audio quality settings.',
+  [AudioServiceError.CLEANUP_FAILED]: 'Refresh the page to reset audio resources. If issues continue, try clearing browser cache or restarting the browser.',
+  [AudioServiceError.VAD_FAILED]: 'Adjust microphone sensitivity or try using a different microphone. Ensure stable audio input levels.',
+  [AudioServiceError.NETWORK_TIMEOUT]: 'Check your internet connection speed and stability. Try again with a stronger connection or reduced quality settings.'
 };
 
-export interface RecordingResult {
-  duration: number;
-  accuracy: number;
-  timing: {
-    start: number;
-    end: number;
-    segments: Array<{
-      start: number;
-      end: number;
-      text: string;
-    }>;
-  };
-  transcription: string;
-}
-
-export interface AudioServiceState {
-  isInitialized: boolean;
-  isRecording: boolean;
-  error: Error | null;
-  context: AudioContext;
-}
-
-export interface AudioServiceEvent {
-  type: 'start' | 'stop' | 'error' | 'data';
-  data?: any;
-  error?: Error;
-}
-
-export interface AudioServiceError extends Error {
-  code: string;
+export interface AudioErrorDetails {
+  code: AudioServiceError;
+  message: string;
   details?: Record<string, unknown>;
+  recoveryHint?: string;
+}
+
+export interface AudioServiceContext {
+  audioContext: AudioContext;
+  mediaRecorder?: MediaRecorder;
+  audioWorklet?: AudioWorkletNode;
+  vadProcessor?: AudioWorkletNode;
+}
+
+export interface AudioServiceSession {
+  id: string;
+  startTime: number;
+  duration: number;
+  audioData: Float32Array;
+  metadata?: Record<string, unknown>;
+}
+
+export type StateTransitions = {
+  [K in AudioServiceState]: {
+    [E in AudioServiceEvent]?: AudioServiceState;
+  };
+};
+
+export type AudioServiceStateType = keyof typeof AudioServiceState;
+export type AudioServiceEventType = keyof typeof AudioServiceEvent;
+export type AudioServiceErrorType = keyof typeof AudioServiceError;
+export type AudioErrorCategoryType = keyof typeof AudioErrorCategory;
+
+export interface RecordingResult {
+  id: string;
+  startTime: number;
+  duration: number;
+  audioData: Float32Array;
+  accuracy?: number;
 }
 
 export interface VADConfig {
-  threshold: number;
-  windowSize: number;
   sampleRate: number;
+  bufferSize: number;
+  noiseThreshold: number;
+  silenceThreshold: number;
 }
 
 export interface ElevenLabsConfig {
@@ -82,22 +145,30 @@ export interface ElevenLabsConfig {
 
 export interface TTSParams {
   text: string;
-  voiceId: string;
+  voice: string;
   settings?: {
-    stability: number;
-    similarity_boost: number;
-    style?: number;
-    use_speaker_boost?: boolean;
+    speed: number;
+    pitch: number;
+    volume: number;
   };
 }
 
 export interface TTSSession {
   id: string;
-  voiceId: string;
   text: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  audioUrl?: string;
-  error?: Error;
+  voice: string;
+  settings: {
+    speed: number;
+    pitch: number;
+    volume: number;
+  };
+  audioData?: Float32Array;
 }
 
-// ... existing code ...
+export interface AudioService {
+  initializeTTS(sessionId: string, userRole: string): Promise<void>;
+  startRecording(sessionId: string): Promise<void>;
+  stopRecording(sessionId: string): Promise<RecordingResult>;
+  processAudioChunk(sessionId: string, chunk: Float32Array): Promise<boolean>;
+  generateSpeech(params: TTSParams): Promise<Float32Array>;
+}

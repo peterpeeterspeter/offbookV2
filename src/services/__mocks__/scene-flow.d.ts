@@ -110,7 +110,7 @@ export declare const SceneFlowService: {
                 text: string;
                 emotion: string;
             }[];
-        } | undefined;
+        };
         getStats: () => {
             duration: number;
             accuracy: number;

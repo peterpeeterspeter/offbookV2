@@ -12,6 +12,6 @@ interface ToastContextType {
 }
 export declare function ToastProvider({ children }: {
     children: React.ReactNode;
-}): import("react/jsx-runtime").JSX.Element;
+}): React.JSX.Element;
 export declare function useToast(): ToastContextType;
 export {};

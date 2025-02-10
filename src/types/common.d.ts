@@ -1,8 +1,8 @@
 /**
  * Generic dictionary type for key-value pairs
  */
-export type Dict<K extends string | number | symbol = string, V = unknown> = {
-    [key in K]: V;
+export type Dict<V = unknown> = {
+    [key: string]: V;
 };
 /**
  * Utility type to make all properties of T non-nullable

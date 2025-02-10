@@ -1,3 +1,4 @@
+import * as React from "react";
 export interface Scene {
     id: string;
     number: number;
@@ -12,7 +13,7 @@ interface SceneNavigationProps {
     disableAnimations?: boolean;
     testMode?: boolean;
 }
-export declare function SceneNavigation({ scenes, currentScene, onSceneSelect, disableAnimations, testMode, }: SceneNavigationProps): import("react/jsx-runtime").JSX.Element;
+export declare function SceneNavigation({ scenes, currentScene, onSceneSelect, disableAnimations, testMode, }: SceneNavigationProps): React.JSX.Element;
 export declare namespace SceneNavigation {
     var displayName: string;
 }

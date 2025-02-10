@@ -1,1 +1,1 @@
-export declare function CreateSessionDialog(): import("react/jsx-runtime").JSX.Element;
+export declare function CreateSessionDialog(): import("react").JSX.Element;

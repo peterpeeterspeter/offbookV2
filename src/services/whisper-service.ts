@@ -18,15 +18,29 @@ interface DeviceCapabilities {
 
 type QualityLevel = 'low' | 'medium' | 'high';
 
+interface BatteryManager {
+  charging: boolean;
+  chargingTime: number;
+  dischargingTime: number;
+  level: number;
+  addEventListener: (type: string, listener: EventListener) => void;
+  removeEventListener: (type: string, listener: EventListener) => void;
+}
+
+interface CacheEntry {
+  timestamp: number;
+  transcription: string;
+}
+
 export class WhisperService {
   private deviceCapabilities: DeviceCapabilities;
-  private batteryManager: any;
+  private batteryManager: BatteryManager | null = null;
   private isLowPower: boolean = false;
   private isOffline: boolean = false;
   private isBackgrounded: boolean = false;
   private currentQualityLevel: QualityLevel = 'high';
   private socket: WebSocket | null = null;
-  private transcriptionCache = new Map<string, any>();
+  private transcriptionCache = new Map<string, CacheEntry>();
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private readonly CACHE_TTL = 3600000; // 1 hour
@@ -39,9 +53,13 @@ export class WhisperService {
   }
 
   private initializeVisibilityTracking(): void {
-    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
-    window.addEventListener('memorywarning', this.handleMemoryWarning.bind(this));
-    window.addEventListener('audiointerruption', this.handleAudioInterruption.bind(this));
+    const handleVisibilityChange = () => this.handleVisibilityChange();
+    const handleMemoryWarning = () => this.handleMemoryWarning();
+    const handleAudioInterruption = (event: Event) => this.handleAudioInterruption(event);
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('memorywarning', handleMemoryWarning);
+    window.addEventListener('audiointerruption', handleAudioInterruption);
   }
 
   private handleVisibilityChange(): void {
@@ -61,11 +79,11 @@ export class WhisperService {
 
   private cleanupCache(): void {
     const now = Date.now();
-    for (const [key, value] of this.transcriptionCache.entries()) {
+    this.transcriptionCache.forEach((value, key) => {
       if (now - value.timestamp > this.CACHE_TTL) {
         this.transcriptionCache.delete(key);
       }
-    }
+    });
   }
 
   private detectDeviceCapabilities(): DeviceCapabilities {
@@ -98,12 +116,21 @@ export class WhisperService {
   private async initializeBatteryMonitoring(): Promise<void> {
     if (this.deviceCapabilities.hasBatteryAPI) {
       try {
-        this.batteryManager = await (navigator as any).getBattery();
-        this.batteryManager.addEventListener('levelchange', this.handleBatteryChange.bind(this));
-        this.batteryManager.addEventListener('chargingchange', this.handleBatteryChange.bind(this));
+        const batteryManager = await (navigator as any).getBattery();
+        this.batteryManager = batteryManager;
+        const handleBatteryChange = () => this.handleBatteryChange();
+        batteryManager.addEventListener('levelchange', handleBatteryChange);
+        batteryManager.addEventListener('chargingchange', handleBatteryChange);
         this.handleBatteryChange();
       } catch (error) {
-        console.warn('Battery API not available:', error);
+        // Update device capabilities to reflect Battery API unavailability
+        this.deviceCapabilities.hasBatteryAPI = false;
+
+        // Set conservative defaults for power management
+        this.isLowPower = this.deviceCapabilities.isMobile;
+
+        // Update quality level with conservative settings
+        this.updateQualityLevel();
       }
     }
   }
@@ -121,7 +148,8 @@ export class WhisperService {
   private initializeNetworkMonitoring(): void {
     if (this.deviceCapabilities.hasNetworkInfo) {
       const connection = (navigator as any).connection;
-      connection.addEventListener('change', this.handleNetworkChange.bind(this));
+      const handleNetworkChange = () => this.handleNetworkChange();
+      connection.addEventListener('change', handleNetworkChange);
       this.handleNetworkChange();
     }
   }
@@ -182,8 +210,10 @@ export class WhisperService {
 
   private initializeWebSocket(): void {
     this.socket = new WebSocket(this.options.websocketUrl);
-    this.socket.addEventListener('error', this.handleWebSocketError.bind(this));
-    this.socket.addEventListener('close', this.handleWebSocketClose.bind(this));
+    const handleWebSocketError = (event: Event) => this.handleWebSocketError(event);
+    const handleWebSocketClose = (event: Event) => this.handleWebSocketClose(event);
+    this.socket.addEventListener('error', handleWebSocketError);
+    this.socket.addEventListener('close', handleWebSocketClose);
   }
 
   private handleWebSocketError(event: Event): void {
@@ -201,17 +231,23 @@ export class WhisperService {
 
   public dispose(): void {
     if (this.batteryManager) {
-      this.batteryManager.removeEventListener('levelchange', this.handleBatteryChange);
-      this.batteryManager.removeEventListener('chargingchange', this.handleBatteryChange);
+      const handleBatteryChange = () => this.handleBatteryChange();
+      this.batteryManager.removeEventListener('levelchange', handleBatteryChange);
+      this.batteryManager.removeEventListener('chargingchange', handleBatteryChange);
     }
 
     if (this.deviceCapabilities.hasNetworkInfo) {
-      (navigator as any).connection.removeEventListener('change', this.handleNetworkChange);
+      const handleNetworkChange = () => this.handleNetworkChange();
+      (navigator as any).connection.removeEventListener('change', handleNetworkChange);
     }
 
-    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-    window.removeEventListener('memorywarning', this.handleMemoryWarning);
-    window.removeEventListener('audiointerruption', this.handleAudioInterruption);
+    const handleVisibilityChange = () => this.handleVisibilityChange();
+    const handleMemoryWarning = () => this.handleMemoryWarning();
+    const handleAudioInterruption = (event: Event) => this.handleAudioInterruption(event);
+
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('memorywarning', handleMemoryWarning);
+    window.removeEventListener('audiointerruption', handleAudioInterruption);
 
     if (this.socket) {
       this.socket.close();

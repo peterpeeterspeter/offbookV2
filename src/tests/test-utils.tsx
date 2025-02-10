@@ -1,5 +1,9 @@
 import React from "react";
-import { render, RenderOptions } from "@testing-library/react";
+import {
+  render as rtlRender,
+  RenderOptions,
+  RenderResult,
+} from "@testing-library/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/toaster";
 import { vi } from "vitest";
@@ -28,23 +32,28 @@ vi.mock("@/components/ui/toaster", () => ({
   Toaster: () => null,
 }));
 
-// Custom render function that includes providers
-const customRender = (
-  ui: React.ReactElement,
-  options?: Omit<RenderOptions, "wrapper">
-) => {
-  const AllProviders = ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="all-providers">{children}</div>
-  );
+const AllProviders = ({ children }: { children: React.ReactNode }) => (
+  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+    {children}
+    <Toaster />
+  </ThemeProvider>
+);
 
-  return render(ui, { wrapper: AllProviders, ...options });
+const render = (
+  ui: React.ReactElement,
+  options: Omit<RenderOptions, "wrapper"> = {}
+) => {
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <AllProviders>{children}</AllProviders>
+  );
+  return rtlRender(ui, { wrapper: Wrapper, ...options });
 };
 
 // Re-export everything
 export * from "@testing-library/react";
 
 // Override render method
-export { customRender as render };
+export { render };
 
 // Type assertion helper
 export function assertIsReactComponent<T>(

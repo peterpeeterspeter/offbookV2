@@ -1,0 +1,195 @@
+/** @jest-environment jsdom */
+/** @jsxImportSource react */
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  beforeAll,
+} from "vitest";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import SceneFlow from "../SceneFlow";
+import { render } from "../../test/test-utils";
+import { SceneFlowService } from "../../services/scene-flow";
+import { AudioService } from "../../services/audio-service";
+import { ScriptAnalysisService } from "../../services/script-analysis";
+
+// Mock AudioContext
+class MockAudioContext {
+  createGain() {
+    return {
+      connect: vi.fn(),
+      gain: { value: 1 },
+    };
+  }
+}
+
+// Mock services
+vi.mock("../../services/scene-flow");
+vi.mock("../../services/audio-service");
+vi.mock("../../services/script-analysis");
+
+// Mock framer-motion
+vi.mock("framer-motion", () => ({
+  motion: {
+    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+  },
+  AnimatePresence: ({ children }: any) => <>{children}</>,
+}));
+
+describe("SceneFlow", () => {
+  const mockProps = {
+    scriptId: "test-script-1",
+    userRole: "Romeo",
+    onComplete: vi.fn(),
+  } as const;
+
+  beforeAll(() => {
+    // @ts-ignore
+    global.AudioContext = MockAudioContext;
+  });
+
+  beforeEach(async () => {
+    // Reset all mocks before each test
+    vi.clearAllMocks();
+
+    // Initialize services
+    const audioService = await (AudioService as any).initialize();
+    const scriptAnalysisService = await (
+      ScriptAnalysisService as any
+    ).initialize();
+    await SceneFlowService.initialize(audioService, scriptAnalysisService);
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("renders initial scene flow interface", async () => {
+    render(<SceneFlow {...mockProps} />);
+
+    // Check for main elements
+    expect(screen.getByText("Scene Flow Mode")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Scene Selection/i })
+    ).toBeInTheDocument();
+
+    // Wait for scenes to load
+    await waitFor(() => {
+      expect(screen.getByText("First line")).toBeInTheDocument();
+    });
+  });
+
+  it("toggles scene selector", async () => {
+    render(<SceneFlow {...mockProps} />);
+
+    const sceneSelectorButton = screen.getByRole("button", {
+      name: /Scene Selection/i,
+    });
+    await userEvent.click(sceneSelectorButton);
+
+    // Scene selector should be visible
+    await waitFor(() => {
+      const sceneList = screen.getByRole("complementary", { name: /scenes/i });
+      expect(sceneList).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Scene 1" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Scene 2" })
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("toggles settings panel", async () => {
+    render(<SceneFlow {...mockProps} />);
+
+    const settingsButton = screen.getByRole("button", { name: /settings/i });
+    await userEvent.click(settingsButton);
+
+    // Settings panel should be visible with options
+    await waitFor(() => {
+      expect(
+        screen.getByRole("dialog", { name: /settings/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("switch", { name: /adaptive pacing/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("switch", { name: /show emotions/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("switch", { name: /auto-advance/i })
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("handles recording state", async () => {
+    render(<SceneFlow {...mockProps} />);
+
+    // Wait for initial scene load
+    await waitFor(() => {
+      expect(screen.getByText("First line")).toBeInTheDocument();
+    });
+
+    // Check if recording status is shown
+    expect(
+      screen.getByRole("status", { name: /recording in progress/i })
+    ).toBeInTheDocument();
+  });
+
+  it("calls onComplete with stats when session ends", async () => {
+    const { unmount } = render(<SceneFlow {...mockProps} />);
+
+    // Wait for initial scene load
+    await waitFor(() => {
+      expect(screen.getByText("First line")).toBeInTheDocument();
+    });
+
+    // Unmount to trigger session end
+    unmount();
+
+    // Check if onComplete was called with stats
+    expect(mockProps.onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        duration: expect.any(Number),
+        accuracy: expect.any(Number),
+        emotions: expect.any(Object),
+        sceneProgress: expect.any(Object),
+      })
+    );
+  });
+
+  it("maintains accessibility requirements", async () => {
+    render(<SceneFlow {...mockProps} />);
+
+    // Check if main navigation elements are accessible
+    const sceneSelectorButton = screen.getByRole("button", {
+      name: /Scene Selection/i,
+    });
+    const settingsButton = screen.getByRole("button", { name: /settings/i });
+
+    // Verify ARIA labels and keyboard accessibility
+    expect(sceneSelectorButton).toHaveAttribute(
+      "aria-label",
+      "Scene Selection"
+    );
+    expect(settingsButton).toHaveAttribute("aria-label", "settings");
+    expect(sceneSelectorButton).toHaveAttribute("tabIndex", "0");
+    expect(settingsButton).toHaveAttribute("tabIndex", "0");
+
+    // Test keyboard interaction
+    sceneSelectorButton.focus();
+    fireEvent.keyDown(sceneSelectorButton, { key: "Enter" });
+
+    // Scene selector should be visible and accessible
+    await waitFor(() => {
+      const sceneList = screen.getByRole("complementary", { name: /scenes/i });
+      expect(sceneList).toBeInTheDocument();
+      expect(sceneList).toHaveAttribute("aria-label", "Scenes");
+    });
+  });
+});

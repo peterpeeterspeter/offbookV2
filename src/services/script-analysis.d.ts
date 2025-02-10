@@ -34,6 +34,8 @@ export declare class ScriptAnalysisService {
     private currentSession;
     private isRecording;
     private batchProcessor;
+    private readonly retryConfig;
+    private readonly cacheConfig;
     constructor(audioService: AudioService, onProgress?: ((progress: UploadProgress) => void) | undefined);
     private updateProgress;
     initializeTTS(config: TTSConfig): Promise<void>;
@@ -57,7 +59,9 @@ export declare class ScriptAnalysisService {
     }): Promise<ScriptMetadata>;
     private getCacheKey;
     private hashText;
+    private withRetry;
     private withCache;
+    private updateMetrics;
     uploadAndAnalyze(file: File, metadata: ScriptMetadata, userId: string): Promise<Script>;
     getScriptDetails(scriptId: string): Promise<Script>;
     getAnalysisStatus(scriptId: string): Promise<{

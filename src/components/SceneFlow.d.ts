@@ -51,4 +51,4 @@ export interface AudioServiceType {
         accuracy: number;
     }>;
 }
-export default function SceneFlow({ scriptId, userRole, initialScene, onComplete, onError, }: SceneFlowProps): import("react/jsx-runtime").JSX.Element;
+export default function SceneFlow({ scriptId, userRole, initialScene, onComplete, onError, }: SceneFlowProps): import("react").JSX.Element;

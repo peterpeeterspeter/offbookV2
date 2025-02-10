@@ -1,5 +1,5 @@
 import React from "react";
-import { Emotion } from "../../types";
+import type { Emotion, EmotionMetrics } from "../../types/emotions";
 import { cn } from "../../lib/utils";
 
 interface PerformanceMetrics {
@@ -15,7 +15,7 @@ interface PerformanceOverlayProps {
   targetEmotion: Emotion;
   currentIntensity: number;
   targetIntensity: number;
-  metrics: PerformanceMetrics;
+  metrics: EmotionMetrics;
   remainingTime?: number;
   className?: string;
 }
@@ -100,7 +100,7 @@ export function PerformanceOverlay({
               <div className="text-xs text-gray-400">
                 {remainingTime > 0
                   ? `${remainingTime.toFixed(1)}s remaining`
-                  : "Time's up!"}
+                  : "Time is up!"}
               </div>
             )}
           </div>

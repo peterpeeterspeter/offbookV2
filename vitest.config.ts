@@ -1,28 +1,26 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
-import tsconfigPaths from 'vite-tsconfig-paths'
+import path from 'path'
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [react()],
   test: {
-    globals: true,
     environment: 'jsdom',
+    globals: true,
     setupFiles: ['./src/tests/setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
     coverage: {
-      provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
-        'coverage/**',
-        'dist/**',
-        '**/[.]**',
-        'packages/*/test?(s)/**',
-        '**/*.d.ts',
-        '**/virtual:*',
-        '**/__mocks__/*',
-        '**/node_modules/**'
-      ]
-    }
-  }
+        'node_modules/',
+        'src/tests/setup.ts',
+      ],
+    },
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
 })

@@ -1,6 +1,7 @@
+import React from 'react';
 interface PracticeRoomProps {
     userName: string;
     onError?: (error: Error) => void;
 }
-export declare function PracticeRoom({ userName, onError }: PracticeRoomProps): import("react/jsx-runtime").JSX.Element;
+export declare function PracticeRoom({ userName, onError }: PracticeRoomProps): React.JSX.Element;
 export {};

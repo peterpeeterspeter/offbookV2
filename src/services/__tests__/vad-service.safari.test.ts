@@ -2,13 +2,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { VADService, VADOptions, DeviceCapabilities } from '../vad-service';
 import { AudioStateManager } from '../audio-state';
 
+// Import simulateBrowser from test setup
+declare const simulateBrowser: (browser: 'chrome' | 'firefox' | 'safari' | 'mobile-safari', options?: { forceBatteryAPI?: boolean }) => void;
+
 // Mock Safari-specific navigator
 const mockNavigator = {
   userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
   hardwareConcurrency: 8,
-  getBattery: vi.fn().mockRejectedValue(new Error('Battery API not available')), // Safari doesn't support Battery API
 };
-Object.defineProperty(global, 'navigator', { value: mockNavigator, configurable: true });
+
+// Set up Safari environment
+beforeEach(() => {
+  // Simulate Safari browser
+  simulateBrowser('safari', { forceBatteryAPI: false });
+});
+
+afterEach(() => {
+  // Reset browser simulation
+  simulateBrowser('chrome', { forceBatteryAPI: true });
+});
 
 // Safari-specific AudioContext mock
 class SafariAudioContext {
@@ -80,9 +92,18 @@ describe('VAD Service - Safari', () => {
 
   describe('Safari-specific initialization', () => {
     it('should handle lack of Battery API', async () => {
+      // Test without Battery API
+      simulateBrowser('safari', { forceBatteryAPI: false });
       await vadService.initialize(mockStream);
       const capabilities = (vadService as any).deviceCapabilities;
       expect(capabilities.hasBatteryAPI).toBe(false);
+
+      // Test with Battery API
+      simulateBrowser('safari', { forceBatteryAPI: true });
+      const vadServiceWithBattery = new VADService(defaultOptions);
+      await vadServiceWithBattery.initialize(mockStream);
+      const capabilitiesWithBattery = (vadServiceWithBattery as any).deviceCapabilities;
+      expect(capabilitiesWithBattery.hasBatteryAPI).toBe(true);
     });
 
     it('should enforce 44.1kHz sample rate', async () => {

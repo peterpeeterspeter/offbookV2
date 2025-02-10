@@ -1,3 +1,4 @@
+import React from "react";
 type Emotion = "joy" | "sadness" | "anger" | "fear" | "surprise" | "disgust" | "neutral";
 interface ScriptLineProps {
     text: string;
@@ -12,5 +13,5 @@ interface ScriptLineProps {
     };
     onLineClick?: () => void;
 }
-export declare function ScriptLine({ text, emotion, intensity, isActive, isCurrent, isCompleted, timing, onLineClick, }: ScriptLineProps): import("react/jsx-runtime").JSX.Element;
+export declare function ScriptLine({ text, emotion, intensity, isActive, isCurrent, isCompleted, timing, onLineClick, }: ScriptLineProps): React.JSX.Element;
 export {};

@@ -1,0 +1,69 @@
+version: "3.8"
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test
+    environment:
+      - NODE_ENV=test
+      - NEXT_TELEMETRY_DISABLED=1
+    command: npm run test
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+  coverage:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: coverage
+    volumes:
+      - .:/app
+      - test-node-modules:/app/node_modules
+      - ./coverage:/app/coverage
+    environment:
+      - NODE_ENV=test
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_SKIP_NATIVE_COMPILATION=1
+    command: npm run coverage
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+
+  development:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: development
+    volumes:
+      - .:/app
+      - test-node-modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_SKIP_NATIVE_COMPILATION=1
+    command: npm run dev
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+
+volumes:
+  test-node-modules:

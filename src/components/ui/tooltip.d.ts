@@ -1,11 +1,12 @@
 import * as React from "react";
-declare const TooltipProvider: any;
-declare const TooltipRoot: any;
-declare const TooltipTrigger: any;
-declare const TooltipContent: React.ForwardRefExoticComponent<any>;
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+declare const TooltipProvider: React.FC<TooltipPrimitive.TooltipProviderProps>;
+declare const TooltipRoot: React.FC<TooltipPrimitive.TooltipProps>;
+declare const TooltipTrigger: React.ForwardRefExoticComponent<TooltipPrimitive.TooltipTriggerProps & React.RefAttributes<HTMLButtonElement>>;
+declare const TooltipContent: React.ForwardRefExoticComponent<Omit<TooltipPrimitive.TooltipContentProps & React.RefAttributes<HTMLDivElement>, "ref"> & React.RefAttributes<HTMLDivElement>>;
 declare const Tooltip: ({ children, content, ...props }: {
     children: React.ReactNode;
     content: React.ReactNode;
     delayDuration?: number;
-}) => import("react/jsx-runtime").JSX.Element;
+}) => React.JSX.Element;
 export { Tooltip, TooltipProvider, TooltipRoot, TooltipTrigger, TooltipContent, };

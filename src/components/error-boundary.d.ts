@@ -1,1 +1,2 @@
-export declare function RouteErrorBoundary(): import("react/jsx-runtime").JSX.Element;
+import React from "react";
+export declare function RouteErrorBoundary(): React.JSX.Element;

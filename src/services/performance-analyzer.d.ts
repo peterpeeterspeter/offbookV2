@@ -6,6 +6,7 @@ export declare class PerformanceAnalyzer {
     private readonly MEMORY_THRESHOLD;
     private readonly CPU_THRESHOLD;
     private readonly LATENCY_THRESHOLD;
+    private metrics;
     processData(data: unknown[]): Promise<void>;
     processLargeDataSet(data: unknown[]): Promise<void>;
     cleanup(): Promise<void>;
@@ -24,7 +25,7 @@ export declare class PerformanceAnalyzer {
     getMemoryStats(): Promise<{
         heapUsed: number;
         heapTotal: number;
-        external: number;
+        heapLimit: number;
     }>;
     getNetworkStats(): Promise<{
         bandwidth: number;
@@ -48,5 +49,25 @@ export declare class PerformanceAnalyzer {
             network: ReturnType<PerformanceAnalyzer['getNetworkStats']>;
         };
     }>;
+    measureAudioProcessing(): Promise<{
+        processingTime: number;
+        bufferUnderruns: number;
+        latency: number;
+    }>;
+    measureNetworkResilience(conditions: {
+        latency: number;
+        jitter: number;
+        packetLoss: number;
+    }): Promise<{
+        reconnections: number;
+        dataLoss: number;
+        adaptiveBuffering: boolean;
+    }>;
     private trackPerformance;
+    private measureStreamLatency;
+    private measureProcessingTime;
+    private countBufferUnderruns;
+    private countReconnections;
+    private measureDataLoss;
+    private checkAdaptiveBuffering;
 }

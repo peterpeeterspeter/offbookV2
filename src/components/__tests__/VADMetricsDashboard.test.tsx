@@ -169,12 +169,12 @@ describe("VADMetricsDashboard", () => {
       });
     });
 
-    expect(screen.getByText("Processing Time").parentElement).toHaveClass(
-      "status-success"
-    );
-    expect(screen.getByText("Memory Usage").parentElement).toHaveClass(
-      "status-success"
-    );
+    expect(screen.getByText("Processing Time").parentElement).toHaveStyle({
+      borderLeft: "4px solid #4caf50",
+    });
+    expect(screen.getByText("Memory Usage").parentElement).toHaveStyle({
+      borderLeft: "4px solid #4caf50",
+    });
 
     // Test warning status
     act(() => {
@@ -185,12 +185,12 @@ describe("VADMetricsDashboard", () => {
       });
     });
 
-    expect(screen.getByText("Processing Time").parentElement).toHaveClass(
-      "status-warning"
-    );
-    expect(screen.getByText("Memory Usage").parentElement).toHaveClass(
-      "status-warning"
-    );
+    expect(screen.getByText("Processing Time").parentElement).toHaveStyle({
+      borderLeft: "4px solid #ff9800",
+    });
+    expect(screen.getByText("Memory Usage").parentElement).toHaveStyle({
+      borderLeft: "4px solid #ff9800",
+    });
 
     // Test error status
     act(() => {
@@ -202,15 +202,15 @@ describe("VADMetricsDashboard", () => {
       });
     });
 
-    expect(screen.getByText("Processing Time").parentElement).toHaveClass(
-      "status-error"
-    );
-    expect(screen.getByText("Memory Usage").parentElement).toHaveClass(
-      "status-error"
-    );
-    expect(screen.getByText("Error Count").parentElement).toHaveClass(
-      "status-error"
-    );
+    expect(screen.getByText("Processing Time").parentElement).toHaveStyle({
+      borderLeft: "4px solid #f44336",
+    });
+    expect(screen.getByText("Memory Usage").parentElement).toHaveStyle({
+      borderLeft: "4px solid #f44336",
+    });
+    expect(screen.getByText("Error Count").parentElement).toHaveStyle({
+      borderLeft: "4px solid #f44336",
+    });
   });
 
   it("cleans up listeners on unmount", () => {

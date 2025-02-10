@@ -1,0 +1,48 @@
+# Title for the configuration file
+title = "GitLeaks Configuration"
+
+# Global settings
+[allowlist]
+description = "Global allow list"
+paths = [
+    '''node_modules''',
+    '''dist''',
+    '''build''',
+    '''coverage''',
+]
+
+# Rules for detecting secrets
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api[_-]?key|apikey|secret)[_-]?(key)?["\s]*[=:]["\s]*[A-Za-z0-9+/]{32,}'''
+secretGroup = 2
+entropy = 3.5
+
+[[rules]]
+id = "generic-secret"
+description = "Generic Secret"
+regex = '''(?i)secret[_-]?(key)?["\s]*[=:]["\s]*[A-Za-z0-9+/]{32,}'''
+secretGroup = 2
+entropy = 3.5
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key"
+regex = '''(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'''
+entropy = 3.5
+
+[[rules]]
+id = "private-key"
+description = "Private Key"
+regex = '''-----BEGIN ((RSA|DSA|EC|PGP|OPENSSH) )?PRIVATE KEY( BLOCK)?-----'''
+
+[[rules]]
+id = "github-token"
+description = "GitHub Token"
+regex = '''gh[pousr]_[A-Za-z0-9_]{36}'''
+
+[[rules]]
+id = "npm-token"
+description = "NPM Token"
+regex = '''npm_[A-Za-z0-9]{36}'''

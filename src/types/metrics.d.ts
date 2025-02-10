@@ -54,3 +54,36 @@ export interface PracticeMetrics {
         emotionAccuracy: number;
     };
 }
+export interface PerformanceMetrics {
+    pipeline: {
+        totalRequests: number;
+        errors: number;
+        errorRate: number;
+        averageLatency: number;
+        throughput: number;
+        queueUtilization: number;
+        batchEfficiency: number;
+    };
+    cache: {
+        hits: number;
+        misses: number;
+        ratio: number;
+        totalRequests: number;
+        averageLatency: number;
+        frequentItemsRatio: number;
+        uptime: number;
+    };
+    streaming?: {
+        bufferUtilization: number;
+        streamLatency: number;
+        dropoutCount: number;
+        recoveryTime: number;
+        activeStreams: number;
+        processingTime: number;
+        networkLatency: number;
+        adaptiveBufferSize: number;
+        voiceChangeLatency: number;
+        reconnectionCount: number;
+        partialDataSize: number;
+    };
+}

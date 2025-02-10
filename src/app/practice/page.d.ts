@@ -1,1 +1,2 @@
-export default function PracticePage(): import("react/jsx-runtime").JSX.Element;
+import React from 'react';
+export default function PracticePage(): React.JSX.Element;

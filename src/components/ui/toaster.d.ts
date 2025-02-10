@@ -1,3 +1,4 @@
+import React from "react";
 interface Toast {
     id: string;
     title: string;
@@ -9,5 +10,5 @@ interface ToastContextValue {
     removeToast: (id: string) => void;
 }
 export declare function useToast(): ToastContextValue;
-export declare function Toaster(): import("react/jsx-runtime").JSX.Element;
+export declare function Toaster(): React.JSX.Element;
 export {};

@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DailyAPI } from '@/lib/webrtc/daily-api';
 
-export async function POST(req: NextRequest) {
+interface DailyRoom {
+  id: string;
+  name: string;
+  url: string;
+  privacy: string;
+  created_at: string;
+  config?: Record<string, unknown>;
+}
+
+interface DailyApiResponse {
+  room: DailyRoom;
+  token?: string;
+  url?: string;
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse<DailyApiResponse>> {
   try {
     const dailyApi = new DailyAPI();
     const { name, properties } = await req.json();
@@ -30,7 +45,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest): Promise<NextResponse<DailyRoom | { error: string }>> {
   try {
     const dailyApi = new DailyAPI();
     const url = new URL(req.url);
@@ -54,7 +69,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: NextRequest): Promise<NextResponse<{ success: boolean } | { error: string }>> {
   try {
     const dailyApi = new DailyAPI();
     const url = new URL(req.url);
@@ -76,4 +91,4 @@ export async function DELETE(req: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}

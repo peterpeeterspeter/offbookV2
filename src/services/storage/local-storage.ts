@@ -6,6 +6,8 @@ export class LocalStorageEngine implements StorageEngine {
   readonly name = 'localStorage';
   readonly maxSize = 5 * 1024 * 1024; // 5MB
 
+  constructor(private prefix: string = '') {}
+
   get isAvailable(): boolean {
     try {
       const testKey = '__storage_test__';
@@ -17,113 +19,125 @@ export class LocalStorageEngine implements StorageEngine {
     }
   }
 
-  async get<T extends StorableData>(key: string): Promise<T | null> {
+  async get<T>(key: string): Promise<T | null> {
     try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-
-      // Parse the stored data
-      const stored = JSON.parse(raw);
-
-      // Check expiration first
-      if (stored.expiresAt && stored.expiresAt < Date.now()) {
-        await this.delete(key);
+      const data = localStorage.getItem(this.getKey(key));
+      if (data === null) {
         return null;
       }
+      try {
+        const parsed = JSON.parse(data);
 
-      let data = stored.data;
+        // Check if data is encrypted
+        if (parsed.encrypted) {
+          const decrypted = await decrypt(parsed.data);
+          if (decrypted === null || decrypted === undefined) {
+            return null;
+          }
+          return decrypted as T;
+        }
 
-      // Handle encrypted data
-      if (stored.encrypted) {
-        data = await decrypt(data);
+        // Check expiration
+        if (parsed.expiresAt && parsed.expiresAt < Date.now()) {
+          await this.delete(key);
+          return null;
+        }
+
+        return parsed.data as T;
+      } catch (error: unknown) {
+        const e = error instanceof Error ? error : new Error(String(error));
+        console.error(`Error parsing JSON data for key ${key}:`, e);
+        return null;
       }
-
-      // Handle compressed data
-      if (stored.compressed) {
-        data = await decompress(data);
-      }
-
-      return data as T;
-    } catch (error) {
-      console.error(`Error reading from localStorage:`, error);
+    } catch (error: unknown) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error reading from localStorage:`, e);
       return null;
     }
   }
 
-  async set<T extends StorableData>(
-    key: string,
-    value: T,
-    options?: StorageOptions
-  ): Promise<void> {
+  async set<T>(key: string, value: T, options: StorageOptions = {}): Promise<void> {
     try {
-      let data = value;
-      const metadata = {
-        encrypted: false,
-        compressed: false,
-        expiresAt: options?.expiresIn ? Date.now() + options.expiresIn : undefined,
+      const data = {
+        data: value,
+        createdAt: Date.now(),
+        expiresAt: options.expiresIn ? Date.now() + options.expiresIn : undefined,
+        encrypted: false
       };
 
-      // Handle encryption first
-      if (options?.encrypt) {
-        data = await encrypt(data) as T;
-        metadata.encrypted = true;
-      }
-
-      // Handle compression after encryption
-      if (options?.compress) {
-        data = await compress(data) as T;
-        metadata.compressed = true;
-      }
-
-      const stored = {
-        ...metadata,
-        data,
-        updatedAt: Date.now(),
-      };
-
-      // Check size before storing
-      const serialized = JSON.stringify(stored);
-      if (serialized.length > this.maxSize) {
-        throw new Error(`Data size exceeds localStorage limit of ${this.maxSize} bytes`);
-      }
-
-      try {
-        localStorage.setItem(key, serialized);
-      } catch (error) {
-        if (error instanceof Error && error.name === 'QuotaExceededError') {
-          // Handle storage full - remove expired items
-          await this.clearExpired();
-          // Try again
-          localStorage.setItem(key, serialized);
-        } else {
-          throw error;
+      // Handle encryption
+      if (options.encrypt) {
+        try {
+          const encrypted = await encrypt(value);
+          data.data = encrypted as unknown as T;
+          data.encrypted = true;
+        } catch (error) {
+          console.error('Encryption failed:', error);
+          throw new Error('Failed to encrypt data');
         }
       }
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`Failed to store data: ${error.message}`);
+
+      // Try to store the data
+      try {
+        localStorage.setItem(this.getKey(key), JSON.stringify(data));
+      } catch (error: unknown) {
+        const e = error instanceof Error ? error : new Error(String(error));
+        if (e.name === 'QuotaExceededError') {
+          // Try to clear expired items and retry
+          await this.clearExpired();
+          try {
+            localStorage.setItem(this.getKey(key), JSON.stringify(data));
+            return;
+          } catch (retryError: unknown) {
+            const re = retryError instanceof Error ? retryError : new Error(String(retryError));
+            throw new Error(`Storage quota exceeded even after clearing expired items: ${re.message}`);
+          }
+        }
+        throw e;
       }
-      throw error;
+    } catch (error: unknown) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error writing to localStorage:`, e);
+      throw new Error(`Failed to write to localStorage: ${e.message}`);
     }
   }
 
   async delete(key: string): Promise<void> {
-    localStorage.removeItem(key);
+    try {
+      localStorage.removeItem(this.getKey(key));
+    } catch (error: unknown) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error deleting from localStorage:`, e);
+      throw new Error(`Failed to delete from localStorage: ${e.message}`);
+    }
   }
 
   async clear(): Promise<void> {
-    localStorage.clear();
+    try {
+      const keys = await this.keys();
+      for (const key of keys) {
+        await this.delete(key);
+      }
+    } catch (error: unknown) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error clearing localStorage:`, e);
+      throw new Error(`Failed to clear localStorage: ${e.message}`);
+    }
   }
 
   async keys(): Promise<string[]> {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key !== null) {
+      if (key !== null && key.startsWith(this.prefix)) {
         keys.push(key);
       }
     }
     return keys;
+  }
+
+  private getKey(key: string): string {
+    return this.prefix ? `${this.prefix}:${key}` : key;
   }
 
   private async clearExpired(): Promise<void> {
@@ -134,7 +148,7 @@ export class LocalStorageEngine implements StorageEngine {
         try {
           const stored = JSON.parse(raw);
           if (stored.expiresAt && stored.expiresAt < Date.now()) {
-            await this.delete(key);
+            await this.delete(key.replace(`${this.prefix}:`, ''));
           }
         } catch {
           // Skip invalid entries

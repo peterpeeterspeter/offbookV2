@@ -86,40 +86,36 @@ export interface ResourceMetrics {
     priority: string;
 }
 export interface BrowserFeatures {
-    webrtc: {
-        getUserMedia: boolean;
-        peerConnection: boolean;
-        dataChannel: boolean;
-        screenSharing: boolean;
-    };
     audio: {
         webAudio: boolean;
         audioWorklet: boolean;
         mediaRecorder: boolean;
         audioCodecs: string[];
     };
-    graphics: {
-        webgl: boolean;
-        webgl2: boolean;
-        extensions: string[];
-        maxTextureSize: number;
+    webRTC: {
+        getUserMedia: boolean;
+        peerConnection: boolean;
+        dataChannel: boolean;
     };
     storage: {
         localStorage: boolean;
-        sessionStorage: boolean;
         indexedDB: boolean;
-        webSQL: boolean;
+        cacheAPI: boolean;
+        sessionStorage: boolean;
         quota: number;
     };
     media: {
         videoCodecs: string[];
         imageFormats: string[];
+        mediaCapabilities: boolean;
         mediaQueries: Record<string, boolean>;
         pictureInPicture: boolean;
     };
     performance: {
-        performanceObserver: boolean;
+        memoryAPI: boolean;
+        performanceAPI: boolean;
         resourceTiming: boolean;
+        performanceObserver: boolean;
         userTiming: boolean;
         navigationTiming: boolean;
     };
@@ -141,6 +137,50 @@ export interface BrowserFeatures {
         webSocket: boolean;
         webAssembly: boolean;
     };
+    graphics: {
+        webgl: boolean;
+        webgl2: boolean;
+        extensions: string[];
+        maxTextureSize: number;
+    };
+}
+export interface BrowserConfig {
+    name: string;
+    userAgent: string;
+    vendor: string;
+    platform: string;
+    hardwareConcurrency: number;
+}
+export interface StorageSupport {
+    localStorage: boolean;
+    indexedDB: boolean;
+    cacheAPI: boolean;
+    quota: number;
+}
+export interface WebRTCSupport {
+    getUserMedia: boolean;
+    peerConnection: boolean;
+    dataChannel: boolean;
+    screensharing: boolean;
+}
+export interface MediaSupport {
+    videoCodecs: string[];
+    imageFormats: string[];
+    mediaCapabilities: boolean;
+    mediaSession: boolean;
+}
+export interface AudioSupport {
+    webAudio: boolean;
+    mediaRecorder: boolean;
+    audioWorklet: boolean;
+    audioCodecs: string[];
+}
+export interface PerformanceMetrics {
+    memoryUsage: number;
+    cpuUsage: number;
+    frameRate: number;
+    batteryLevel?: number;
+    networkType?: string;
 }
 export interface CompatibilityReport {
     browser: {
@@ -159,4 +199,12 @@ export interface CompatibilityReport {
         description: string;
         priority: 'high' | 'medium' | 'low';
     }>;
+}
+export interface BatteryManager {
+    charging: boolean;
+    chargingTime: number;
+    dischargingTime: number;
+    level: number;
+    addEventListener: (type: string, listener: EventListener) => void;
+    removeEventListener: (type: string, listener: EventListener) => void;
 }

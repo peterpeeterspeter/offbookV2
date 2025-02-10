@@ -1,3 +1,4 @@
+import React from "react";
 import { Emotion } from "../../types";
 export interface ScriptLine {
     id: string;
@@ -17,5 +18,5 @@ interface ScriptDisplayProps {
     onLineComplete?: (lineId: string) => void;
     className?: string;
 }
-export declare function ScriptDisplay({ lines, currentLineId, activeLineId, completedLineIds, onLineSelect, onLineComplete, className, }: ScriptDisplayProps): import("react/jsx-runtime").JSX.Element;
+export declare function ScriptDisplay({ lines, currentLineId, activeLineId, completedLineIds, onLineSelect, onLineComplete, className, }: ScriptDisplayProps): React.JSX.Element;
 export {};

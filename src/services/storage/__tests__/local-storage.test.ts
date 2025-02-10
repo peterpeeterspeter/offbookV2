@@ -1,6 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { LocalStorageEngine } from '../local-storage';
 import { StorableData } from '../types';
+import * as encryption from '../encryption';
+
+vi.mock('../encryption');
 
 interface TestData extends StorableData {
   name: string;
@@ -22,6 +25,21 @@ describe('LocalStorageEngine', () => {
       updatedAt: Date.now(),
       version: 1,
     };
+
+    // Reset encryption mocks
+    vi.mocked(encryption.encrypt).mockImplementation(async (data) => {
+      return `encrypted:${JSON.stringify(data)}`;
+    });
+    vi.mocked(encryption.decrypt).mockImplementation(async (data) => {
+      if (!data.startsWith('encrypted:')) {
+        throw new Error('Failed to decrypt data');
+      }
+      return JSON.parse(data.slice(10));
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
   describe('Availability Check', () => {
@@ -125,14 +143,14 @@ describe('LocalStorageEngine', () => {
       mockQuotaError.name = 'QuotaExceededError';
 
       // Mock localStorage.setItem to throw quota error once
-      const originalSetItem = localStorage.setItem;
+      const originalSetItem = (key: string, value: string) => localStorage.setItem(key, value);
       let hasThrown = false;
-      localStorage.setItem = vi.fn().mockImplementation((...args) => {
+      localStorage.setItem = vi.fn().mockImplementation((key: string, value: string) => {
         if (!hasThrown) {
           hasThrown = true;
           throw mockQuotaError;
         }
-        return originalSetItem.apply(localStorage, args);
+        return originalSetItem(key, value);
       });
 
       // Set expired item
@@ -173,13 +191,10 @@ describe('LocalStorageEngine', () => {
 
     it('should handle encryption failures gracefully', async () => {
       // Mock encryption to fail
-      vi.mock('../encryption', () => ({
-        encrypt: vi.fn().mockRejectedValue(new Error('Encryption failed')),
-        decrypt: vi.fn(),
-      }));
+      vi.mocked(encryption.encrypt).mockRejectedValueOnce(new Error('Encryption failed'));
 
       await expect(storage.set('secret', testData, { encrypt: true }))
-        .rejects.toThrow('Encryption failed');
+        .rejects.toThrow('Failed to encrypt data');
     });
   });
 });

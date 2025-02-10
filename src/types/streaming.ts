@@ -20,19 +20,27 @@ export interface PipelineMetrics {
   throughput: number;
   queueUtilization: number;
   batchEfficiency: number;
+  slowThreshold: number;
+  slowOperations: number;
+}
+
+export interface CacheMetrics {
+  hits: number;
+  misses: number;
+  ratio: number;
+  totalRequests: number;
+  averageLatency: number;
+  frequentItemsRatio: number;
+  uptime: number;
 }
 
 export interface PerformanceMetrics {
+  type: string;
+  name: string;
+  duration: number;
+  timestamp: number;
   pipeline: PipelineMetrics;
-  cache: {
-    hits: number;
-    misses: number;
-    ratio: number;
-    totalRequests: number;
-    averageLatency: number;
-    frequentItemsRatio: number;
-    uptime: number;
-  };
+  cache: CacheMetrics;
   streaming?: StreamingMetrics;
 }
 

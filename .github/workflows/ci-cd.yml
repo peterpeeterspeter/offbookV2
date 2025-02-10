@@ -1,1 +1,460 @@
- 
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: "20"
+  NEXT_TELEMETRY_DISABLED: 1
+  MAX_RETRIES: 3
+  PARALLEL_WORKERS: 4
+
+jobs:
+  # Make security scan optional
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    if: ${{ false }} # Disable for now
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Dependency Vulnerability Scanning
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+      - name: Upload Snyk results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: snyk.sarif
+
+      # Container Security Scanning
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "image"
+          scan-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          vuln-type: "os,library"
+          ignore-unfixed: true
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"
+          category: "trivy"
+
+      # License Compliance
+      - name: Install license checker
+        run: npm install -g license-checker
+
+      - name: Check licenses
+        run: |
+          echo "Checking licenses..."
+          license-checker --production --json > license-report.json
+          license-checker --production --failOn 'GPL;LGPL;AGPL;NGPL' || (echo "Found restricted licenses" && exit 1)
+
+      # Secret Scanning
+      - name: Run GitGuardian scan
+        uses: GitGuardian/ggshield-action@master
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-path: .gitleaks.toml
+          verbose: true
+          redact: true
+
+      # SAST Scanning
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, typescript
+          queries: security-extended,security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+      # Generate Security Report
+      - name: Generate Security Report
+        if: always()
+        run: |
+          echo "# Security Scan Results" > security-report.md
+          echo "## Dependency Vulnerabilities" >> security-report.md
+          echo "\`\`\`" >> security-report.md
+          cat snyk.sarif >> security-report.md
+          echo "\`\`\`" >> security-report.md
+
+          echo "## Container Vulnerabilities" >> security-report.md
+          echo "\`\`\`" >> security-report.md
+          cat trivy-results.sarif >> security-report.md
+          echo "\`\`\`" >> security-report.md
+
+          echo "## License Compliance" >> security-report.md
+          echo "\`\`\`" >> security-report.md
+          cat license-report.json >> security-report.md
+          echo "\`\`\`" >> security-report.md
+
+      - name: Upload Security Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-report
+          path: security-report.md
+
+      # Fail if any high severity issues found
+      - name: Check for high severity issues
+        if: always()
+        run: |
+          if grep -q '"severity": "high"' trivy-results.sarif || grep -q '"severity": "CRITICAL"' snyk.sarif; then
+            echo "High severity security issues found"
+            exit 1
+          fi
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest # Remove dependency on security-scan
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run unit tests
+        run: npm run test:unit -- --coverage
+      - name: Upload unit test coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: unit-test-coverage
+          path: coverage
+          retention-days: 14
+
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run integration tests
+        run: npm run test:integration -- --coverage
+        env:
+          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
+      - name: Upload integration test coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-coverage
+          path: coverage
+          retention-days: 14
+
+  e2e-tests:
+    name: E2E Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser: [chromium, firefox, webkit]
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install ${{ matrix.browser }} --with-deps
+      - name: Build application
+        run: npm run build
+      - name: Run E2E tests
+        run: npm run test:e2e -- --browser ${{ matrix.browser }} --shard=${{ matrix.shard }}/2
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-test-results-${{ matrix.browser }}-${{ matrix.shard }}
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+
+  performance-tests:
+    name: Performance Tests
+    needs: e2e-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build application
+        run: npm run build
+      - name: Run performance tests
+        run: npm run test:performance
+      - name: Upload performance test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-test-results
+          path: performance-report
+          retention-days: 14
+
+  memory-tests:
+    name: Memory Leak Detection
+    needs: performance-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Build application
+        run: npm run build
+      - name: Run memory tests
+        run: npm run test:memory
+      - name: Upload memory test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: memory-test-results
+          path: memory-report
+          retention-days: 14
+
+  test-report:
+    name: Generate Test Report
+    needs:
+      [
+        unit-tests,
+        integration-tests,
+        e2e-tests,
+        performance-tests,
+        memory-tests,
+      ]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Download all test artifacts
+        uses: actions/download-artifact@v3
+      - name: Generate combined report
+        run: |
+          npm ci
+          npm run generate-test-report
+      - name: Upload combined test report
+        uses: actions/upload-artifact@v3
+        with:
+          name: combined-test-report
+          path: test-report
+          retention-days: 30
+      - name: Check test failures
+        run: |
+          if [ -f test-report/failures.txt ]; then
+            echo "Tests failed. See combined-test-report for details."
+            exit 1
+          fi
+
+  # Make deployment jobs optional
+  build:
+    needs: test-report
+    runs-on: ubuntu-latest
+    if: ${{ false }} # Disable for now
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ false }} # Disable for now
+    environment:
+      name: staging
+      url: https://staging.example.com
+    concurrency:
+      group: staging_environment
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up monitoring
+        run: |
+          mkdir -p monitoring/prometheus
+          mkdir -p monitoring/grafana/provisioning
+          mkdir -p monitoring/loki
+          mkdir -p monitoring/promtail
+
+      - name: Configure monitoring
+        run: |
+          # Set up Grafana dashboards
+          cp .github/monitoring/dashboards/* monitoring/grafana/provisioning/
+          # Configure Prometheus alerts
+          cp .github/monitoring/alerts/* monitoring/prometheus/
+          # Set up log aggregation
+          cp .github/monitoring/loki-config.yml monitoring/loki/
+
+      - name: Deploy to staging
+        env:
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+        run: |
+          docker-compose -f docker-compose.staging.yml pull
+          docker-compose -f docker-compose.staging.yml up -d
+
+      - name: Run health checks
+        run: |
+          attempts=0
+          max_attempts=30
+          until $(curl --output /dev/null --silent --fail http://localhost:3000/api/health); do
+            if [ $attempts -eq $max_attempts ]; then
+              echo "Health check failed after $max_attempts attempts"
+              exit 1
+            fi
+            attempts=$((attempts+1))
+            echo "Waiting for service to be healthy... (Attempt $attempts/$max_attempts)"
+            sleep 10
+          done
+          echo "Service is healthy!"
+
+      - name: Run performance benchmarks
+        run: npm run benchmark
+
+      - name: Monitor deployment
+        run: |
+          # Start monitoring
+          docker-compose -f docker-compose.monitoring.yml up -d
+
+          # Wait for metrics to be collected
+          sleep 60
+
+          # Check performance metrics
+          curl -X POST ${{ secrets.WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "deployed",
+              "version": "${{ github.sha }}",
+              "environment": "staging",
+              "metrics": {
+                "responseTime": "'$(curl -s localhost:9090/api/v1/query?query=avg_response_time)'",
+                "errorRate": "'$(curl -s localhost:9090/api/v1/query?query=error_rate)'",
+                "memoryUsage": "'$(curl -s localhost:9090/api/v1/query?query=memory_usage)'"
+              }
+            }'
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: ${{ false }} # Disable for now
+    environment:
+      name: production
+      url: https://example.com
+    concurrency:
+      group: production_environment
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Deploy to production
+        run: |
+          # Implement staged rollout
+          echo "Starting staged rollout..."
+          # Add your production deployment steps here
+
+      - name: Monitor production deployment
+        run: |
+          # Add production monitoring steps here
+          echo "Monitoring production deployment..."
+
+      - name: Verify deployment
+        run: |
+          # Add deployment verification steps here
+          echo "Verifying deployment..."

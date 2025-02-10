@@ -15,7 +15,7 @@ describe('DeviceDetector', () => {
       configurable: true
     })
 
-    const device = detector.detect()
+    const device = detector.getDeviceInfo()
     expect(device.os).toBe('iOS')
     expect(device.type).toBe('mobile')
     expect(device.capabilities.touchScreen).toBe(true)
@@ -27,7 +27,7 @@ describe('DeviceDetector', () => {
       configurable: true
     })
 
-    const device = detector.detect()
+    const device = detector.getDeviceInfo()
     expect(device.os).toBe('Android')
     expect(device.type).toBe('mobile')
     expect(device.capabilities.touchScreen).toBe(true)
@@ -39,7 +39,7 @@ describe('DeviceDetector', () => {
       configurable: true
     })
 
-    const device = detector.detect()
+    const device = detector.getDeviceInfo()
     expect(device.type).toBe('tablet')
     expect(device.capabilities.touchScreen).toBe(true)
   })
@@ -48,14 +48,14 @@ describe('DeviceDetector', () => {
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true })
     Object.defineProperty(window, 'innerHeight', { value: 812, configurable: true })
 
-    const device = detector.detect()
+    const device = detector.getDeviceInfo()
     expect(device.screen.width).toBe(375)
     expect(device.screen.height).toBe(812)
     expect(device.screen.orientation).toBe('portrait')
   })
 
   it('should detect device capabilities', () => {
-    const device = detector.detect()
+    const device = detector.getDeviceInfo()
     expect(device.capabilities).toMatchObject({
       touchScreen: expect.any(Boolean),
       accelerometer: expect.any(Boolean),

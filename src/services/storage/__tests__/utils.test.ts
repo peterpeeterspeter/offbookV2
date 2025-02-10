@@ -48,8 +48,17 @@ describe('Compression Utils', () => {
   });
 
   it('should reject invalid compressed data', async () => {
-    await expect(decompress('invalid-data'))
-      .rejects.toThrow('Failed to decompress data');
+    // Test with non-base64 data
+    await expect(decompress('not-base64-data'))
+      .rejects.toThrow('Invalid base64 data');
+
+    // Test with valid base64 but not compressed data
+    await expect(decompress('SGVsbG8gV29ybGQh'))
+      .rejects.toThrow('Failed to decompress data: invalid compressed format');
+
+    // Test with empty string
+    await expect(decompress(''))
+      .rejects.toThrow('Invalid compressed data');
   });
 });
 
@@ -107,22 +116,28 @@ describe('Encryption Utils', () => {
     // Save original key
     const originalKey = process.env.NEXT_PUBLIC_ENCRYPTION_KEY;
 
-    // Test with key 1
-    process.env.NEXT_PUBLIC_ENCRYPTION_KEY = 'key1';
-    const encrypted1 = await encrypt(testData);
+    try {
+      // Test with key 1
+      process.env.NEXT_PUBLIC_ENCRYPTION_KEY = 'key1';
+      const encrypted1 = await encrypt(testData);
+      const decrypted1 = await decrypt(encrypted1);
+      expect(decrypted1).toEqual(testData);
 
-    // Test with key 2
-    process.env.NEXT_PUBLIC_ENCRYPTION_KEY = 'key2';
-    const encrypted2 = await encrypt(testData);
+      // Test with key 2
+      process.env.NEXT_PUBLIC_ENCRYPTION_KEY = 'key2';
+      const encrypted2 = await encrypt(testData);
+      const decrypted2 = await decrypt(encrypted2);
+      expect(decrypted2).toEqual(testData);
 
-    // Should produce different results
-    expect(encrypted1).not.toBe(encrypted2);
+      // Verify different keys produce different results
+      expect(encrypted1).not.toBe(encrypted2);
 
-    // Should only decrypt with correct key
-    await expect(decrypt(encrypted1))
-      .rejects.toThrow('Failed to decrypt data');
-
-    // Restore original key
-    process.env.NEXT_PUBLIC_ENCRYPTION_KEY = originalKey;
+      // Try to decrypt data with wrong key
+      process.env.NEXT_PUBLIC_ENCRYPTION_KEY = 'key1';
+      await expect(decrypt(encrypted2)).rejects.toThrow('Failed to decrypt data');
+    } finally {
+      // Always restore original key
+      process.env.NEXT_PUBLIC_ENCRYPTION_KEY = originalKey;
+    }
   });
 });

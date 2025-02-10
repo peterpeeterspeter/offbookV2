@@ -1,3 +1,4 @@
+import * as React from "react";
 interface Line {
     id: string;
     character: string;
@@ -15,5 +16,5 @@ interface TeleprompterProps {
     testMode?: boolean;
     disableAnimations?: boolean;
 }
-export declare function Teleprompter({ lines, currentLine, onLineComplete, getCharacterColor, autoScroll, scrollSpeed, testMode, disableAnimations, }: TeleprompterProps): import("react/jsx-runtime").JSX.Element;
+export declare function Teleprompter({ lines, currentLine, onLineComplete, getCharacterColor, autoScroll, scrollSpeed, testMode, disableAnimations, }: TeleprompterProps): React.JSX.Element;
 export {};

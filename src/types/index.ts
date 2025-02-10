@@ -1,13 +1,11 @@
 // Base types
-export type Emotion =
-  | 'happy'
-  | 'sad'
-  | 'angry'
-  | 'neutral'
-  | 'excited'
-  | 'fearful'
-  | 'disgusted'
-  | 'surprised';
+export type {
+  Emotion,
+  EmotionIntensity,
+  EmotionTransition,
+  EmotionMetrics
+} from './emotions';
+export { EmotionValues } from './emotions';
 
 /**
  * Current emotion type implementation uses string literals for rapid development.
@@ -57,8 +55,28 @@ export type {
 export type {
   AudioConfig,
   RecordingSession,
-  RecordingTiming,
-  AudioService
+  AudioService,
+  RecordingResult,
+  VADConfig,
+  ElevenLabsConfig,
+  TTSParams,
+  TTSSession,
+  AudioServiceContext,
+  AudioServiceSession,
+  AudioServiceStateData,
+  AudioErrorDetails,
+  CueSignal,
+  CueDisplay,
+  SceneProgression,
+  StateTransitions
+} from './audio';
+
+export {
+  AudioServiceState,
+  AudioServiceEvent,
+  AudioServiceError,
+  AudioErrorCategory,
+  ERROR_RECOVERY_HINTS
 } from './audio';
 
 // Metrics types

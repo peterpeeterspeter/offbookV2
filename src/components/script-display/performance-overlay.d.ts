@@ -1,3 +1,4 @@
+import React from "react";
 import { Emotion } from "../../types";
 interface PerformanceMetrics {
     emotionMatch: number;
@@ -15,5 +16,5 @@ interface PerformanceOverlayProps {
     remainingTime?: number;
     className?: string;
 }
-export declare function PerformanceOverlay({ isVisible, currentEmotion, targetEmotion, currentIntensity, targetIntensity, metrics, remainingTime, className, }: PerformanceOverlayProps): import("react/jsx-runtime").JSX.Element | null;
+export declare function PerformanceOverlay({ isVisible, currentEmotion, targetEmotion, currentIntensity, targetIntensity, metrics, remainingTime, className, }: PerformanceOverlayProps): React.JSX.Element | null;
 export {};

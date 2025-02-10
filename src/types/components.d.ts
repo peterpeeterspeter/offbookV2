@@ -10,7 +10,7 @@ export interface Line {
 export type IconComponent = React.ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
 export interface TeleprompterProps {
     lines: Line[];
-    currentLine: string;
+    currentLine: string | null;
     onLineComplete: (lineId: string) => void;
     getCharacterColor: (character: string) => string;
     autoScroll?: boolean;
@@ -20,9 +20,11 @@ export interface TeleprompterProps {
 }
 export interface ScriptContentProps {
     lines: Line[];
-    currentLine?: string;
+    currentLine?: string | null;
     onLineSelect: (lineId: string) => void;
     characterColors: Record<string, string>;
     testMode?: boolean;
     disableAnimations?: boolean;
 }
+export type { AudioServiceState, AudioServiceError, AudioErrorCategory, AudioErrorDetails, AudioServiceEvent } from './audio';
+export type Emotion = 'joy' | 'surprise' | 'anger' | 'fear' | 'sadness' | 'disgust' | 'neutral';

@@ -1,10 +1,34 @@
 import { AES, enc } from 'crypto-js';
 
-// Get encryption key from environment
+/**
+ * Encryption utility module for secure data storage.
+ * Uses AES encryption through crypto-js library.
+ * Handles special cases like null/undefined and provides robust error handling.
+ */
+
+/**
+ * Gets the encryption key from environment variables
+ * Falls back to a development key if not set (should only be used in development)
+ */
 const getEncryptionKey = () => process.env.NEXT_PUBLIC_ENCRYPTION_KEY || 'default-dev-key';
 
 /**
  * Encrypts data using AES encryption
+ *
+ * @param data - Any JSON-serializable data to encrypt
+ * @returns Promise<string> - Encrypted data string
+ * @throws Error if encryption fails
+ *
+ * Special cases:
+ * - Returns 'undefined' for undefined input
+ * - Returns 'null' for null input
+ * - Throws 'Failed to encrypt data' for encryption errors
+ *
+ * @example
+ * ```typescript
+ * const data = { sensitive: 'information' };
+ * const encrypted = await encrypt(data);
+ * ```
  */
 export async function encrypt(data: unknown): Promise<string> {
   try {
@@ -25,7 +49,27 @@ export async function encrypt(data: unknown): Promise<string> {
 }
 
 /**
- * Decrypts AES encrypted data
+ * Decrypts AES encrypted data back to its original form
+ *
+ * @param encryptedData - AES encrypted string
+ * @returns Promise<unknown> - Original decrypted data
+ * @throws Error in the following cases:
+ * - 'Failed to decrypt data' for invalid/corrupted encrypted data
+ * - 'Failed to decrypt data' for wrong encryption key
+ *
+ * Special cases:
+ * - Returns undefined for 'undefined' input
+ * - Returns null for 'null' input
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const decrypted = await decrypt(encryptedString);
+ *   console.log(decrypted);
+ * } catch (error) {
+ *   console.error('Decryption failed:', error);
+ * }
+ * ```
  */
 export async function decrypt(encryptedData: string): Promise<unknown> {
   try {

@@ -12,22 +12,26 @@ export interface StreamingMetrics {
     partialDataSize: number;
 }
 export interface PipelineMetrics {
+    totalRequests: number;
+    errors: number;
+    errorRate: number;
     averageLatency: number;
     throughput: number;
-    errorRate: number;
     queueUtilization: number;
     batchEfficiency: number;
 }
 export interface PerformanceMetrics {
     pipeline: PipelineMetrics;
-    cache: CacheMetrics;
-}
-export interface CacheMetrics {
-    hitRate: number;
-    totalRequests: number;
-    averageLatency: number;
-    frequentItemsRatio: number;
-    uptime: number;
+    cache: {
+        hits: number;
+        misses: number;
+        ratio: number;
+        totalRequests: number;
+        averageLatency: number;
+        frequentItemsRatio: number;
+        uptime: number;
+    };
+    streaming?: StreamingMetrics;
 }
 declare global {
     interface Navigator {

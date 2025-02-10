@@ -1,3 +1,4 @@
+import React from 'react';
 import { Emotion } from '../../types';
 interface EmotionDataPoint {
     emotion: Emotion;
@@ -11,5 +12,5 @@ interface EmotionVisualizerProps {
     className?: string;
     onHover?: (point: EmotionDataPoint | null) => void;
 }
-export declare function EmotionVisualizer({ data, width, height, className, onHover }: EmotionVisualizerProps): import("react/jsx-runtime").JSX.Element;
+export declare function EmotionVisualizer({ data, width, height, className, onHover }: EmotionVisualizerProps): React.JSX.Element;
 export {};

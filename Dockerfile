@@ -1,7 +1,17 @@
 # Build stage
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev
 
 # Install dependencies
 COPY package*.json ./
@@ -15,12 +25,19 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
+
+# Install production dependencies
+RUN apk add --no-cache \
+    cairo \
+    jpeg \
+    pango \
+    giflib
 
 # Add non-root user
 RUN addgroup --system --gid 1001 nodejs

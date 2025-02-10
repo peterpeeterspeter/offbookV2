@@ -53,6 +53,15 @@ type VADStateListener = (state: VADState) => void;
 type VADErrorListener = (error: Error) => void;
 type VADMetricsListener = (metrics: VADPerformanceMetrics) => void;
 
+interface BatteryManager {
+  charging: boolean;
+  chargingTime: number;
+  dischargingTime: number;
+  level: number;
+  addEventListener: (type: string, listener: EventListener) => void;
+  removeEventListener: (type: string, listener: EventListener) => void;
+}
+
 /**
  * Voice Activity Detection service using WebRTC
  */
@@ -63,7 +72,7 @@ export class VADService {
   private metricsListeners: Set<VADMetricsListener> = new Set();
   private options: VADOptions;
   private deviceCapabilities: DeviceCapabilities;
-  private batteryManager: any | null = null;
+  private batteryManager: BatteryManager | null = null;
   private isLowPower = false;
   private audioContext: AudioContext | null = null;
   private metricsInterval: number | null = null;
@@ -102,12 +111,30 @@ export class VADService {
   private async initializeBatteryMonitoring(): Promise<void> {
     if (this.deviceCapabilities.hasBatteryAPI && this.options.mobileOptimization?.batteryAware) {
       try {
-        this.batteryManager = await (navigator as any).getBattery();
-        this.batteryManager.addEventListener('levelchange', this.handleBatteryChange.bind(this));
-        this.batteryManager.addEventListener('chargingchange', this.handleBatteryChange.bind(this));
+        const batteryManager = await (navigator as any).getBattery();
+        this.batteryManager = batteryManager;
+        const handleBatteryChange = () => this.handleBatteryChange();
+        batteryManager.addEventListener('levelchange', handleBatteryChange);
+        batteryManager.addEventListener('chargingchange', handleBatteryChange);
         this.handleBatteryChange();
       } catch (error) {
-        console.warn('Battery API not available:', error);
+        // Update device capabilities to reflect Battery API unavailability
+        this.deviceCapabilities.hasBatteryAPI = false;
+
+        // Set conservative defaults for power management
+        this.isLowPower = this.deviceCapabilities.isMobile;
+
+        // Update metrics
+        if (this.lastMetrics) {
+          this.lastMetrics.batteryLevel = undefined;
+          this.lastMetrics.isCharging = undefined;
+          this.notifyMetricsListeners(this.lastMetrics);
+        }
+
+        // Update worker configuration with power-saving settings for mobile
+        if (this.deviceCapabilities.isMobile) {
+          this.updateWorkerConfig();
+        }
       }
     }
   }
@@ -177,8 +204,10 @@ export class VADService {
         });
 
         // Set up worker message handlers
-        this.worker.onmessage = this.handleWorkerMessage.bind(this);
-        this.worker.onerror = this.handleWorkerError.bind(this);
+        const handleWorkerMessage = (event: MessageEvent) => this.handleWorkerMessage(event);
+        const handleWorkerError = (error: ErrorEvent) => this.handleWorkerError(error);
+        this.worker.onmessage = handleWorkerMessage;
+        this.worker.onerror = handleWorkerError;
 
         // Configure worker with optimal settings
         this.updateWorkerConfig();
@@ -450,8 +479,9 @@ export class VADService {
 
     // Clear battery monitoring
     if (this.batteryManager) {
-      this.batteryManager.removeEventListener('levelchange', this.handleBatteryChange);
-      this.batteryManager.removeEventListener('chargingchange', this.handleBatteryChange);
+      const handleBatteryChange = () => this.handleBatteryChange();
+      this.batteryManager.removeEventListener('levelchange', handleBatteryChange);
+      this.batteryManager.removeEventListener('chargingchange', handleBatteryChange);
       this.batteryManager = null;
     }
 

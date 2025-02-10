@@ -1,4 +1,4 @@
-export type Emotion = 'happy' | 'sad' | 'angry' | 'neutral' | 'excited' | 'fearful' | 'disgusted' | 'surprised';
+export type Emotion = 'joy' | 'surprise' | 'anger' | 'fear' | 'sadness' | 'disgust' | 'neutral';
 /**
  * Current emotion type implementation uses string literals for rapid development.
  * Future improvements planned:

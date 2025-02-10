@@ -1,52 +1,30 @@
-import { AudioServiceState, AudioServiceEvent, AudioErrorDetails, AudioServiceError, AudioServiceStateData as IAudioServiceStateData } from '@/types/audio';
-/**
- * Audio service state interface
- */
-export interface AudioServiceStateData {
-    state: AudioServiceState;
-    error: AudioErrorDetails | null;
-    session: {
-        id: string | null;
-        startTime: number | null;
-        duration: number | null;
-        chunks: number;
-    };
-    context: {
-        sampleRate: number;
-        channels: number;
-        isContextRunning: boolean;
-        networkTimeout?: number;
-        bitsPerSample?: number;
-        bufferSize?: number;
-        compressionFormat?: string;
-        vadEnabled: boolean;
-        vadThreshold: number;
-        vadSampleRate: number;
-        vadBufferSize: number;
-        noiseThreshold: number;
-        silenceThreshold: number;
-    };
-    vad?: {
-        speaking: boolean;
-        noiseLevel: number;
-        lastActivity: number;
-        confidence: number;
-    };
-}
+import { AudioServiceState, AudioServiceEvent, AudioServiceError, AudioErrorCategory, type AudioServiceStateType, type AudioServiceEventType, type AudioServiceErrorType, type AudioErrorCategoryType, type AudioServiceContext, type AudioServiceSession, type AudioServiceStateData, type AudioErrorDetails } from '@/types/audio';
+export type { AudioServiceState, AudioServiceEvent, AudioServiceError, AudioErrorCategory };
+export type { AudioServiceStateType, AudioServiceEventType, AudioServiceErrorType, AudioErrorCategoryType, AudioServiceContext, AudioServiceSession, AudioServiceStateData, AudioErrorDetails };
+declare const errorMessageMap: Record<keyof typeof AudioServiceError, string>;
+export { errorMessageMap as ERROR_MESSAGES };
 /**
  * Error recovery hints
  */
-export declare const ERROR_RECOVERY_HINTS: Partial<Record<AudioServiceError, string>>;
+export declare const ERROR_RECOVERY_HINTS: Partial<Record<keyof typeof AudioServiceError, string>>;
 /**
  * State manager for audio service
  */
 export declare class AudioStateManager {
     private static instance;
     private state;
+    private subscribers;
     private constructor();
     static getInstance(): AudioStateManager;
-    getState(): IAudioServiceStateData;
-    transition(event: AudioServiceEvent, context?: Partial<IAudioServiceStateData>): void;
-    createError(code: AudioServiceError, details?: Record<string, unknown>): AudioErrorDetails;
+    getState(): AudioServiceStateData;
+    subscribe(callback: (state: AudioServiceStateData) => void): () => void;
+    transition(event: AudioServiceEventType, context?: Partial<AudioServiceStateData>): void;
+    createError(code: AudioServiceErrorType, details?: {
+        originalError?: Error | undefined;
+    }): AudioErrorDetails;
+    private getErrorCategory;
+    private getErrorMessage;
+    private isErrorRetryable;
+    private notifySubscribers;
     restore(): void;
 }

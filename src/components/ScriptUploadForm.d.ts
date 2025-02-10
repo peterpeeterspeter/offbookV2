@@ -1,1 +1,2 @@
-export default function ScriptUploadForm(): import("react/jsx-runtime").JSX.Element;
+import React from "react";
+export default function ScriptUploadForm(): React.JSX.Element;
