@@ -177,17 +177,17 @@ describe('AudioService', () => {
     });
 
     it('should start recording with VAD', async () => {
-      await AudioService.startRecording();
+      await AudioService.startRecording('test-session');
       await waitForStateUpdate();
 
       expect(AudioService.getState().state).toBe(AudioServiceState.RECORDING);
     });
 
     it('should stop recording and return metrics', async () => {
-      await AudioService.startRecording();
+      await AudioService.startRecording('test-session');
       await waitForStateUpdate();
 
-      const result = await AudioService.stopRecording();
+      const result = await AudioService.stopRecording('test-session');
       await waitForStateUpdate();
 
       expect(result).toBeDefined();
@@ -206,8 +206,48 @@ describe('AudioService', () => {
 
       vi.spyOn(window, 'MediaRecorder').mockImplementation(() => mockMediaRecorder as any);
 
-      await expect(AudioService.startRecording()).rejects.toThrow('Recording failed');
+      await expect(AudioService.startRecording('test-session')).rejects.toThrow('Recording failed');
       expect(AudioService.getState().state).toBe(AudioServiceState.ERROR);
+    });
+
+    it('should start and stop recording', async () => {
+      const sessionId = 'test-session-1';
+      await AudioService.startRecording(sessionId);
+      const result = await AudioService.stopRecording(sessionId);
+      expect(result).toBeDefined();
+    });
+
+    it('should handle recording errors', async () => {
+      const sessionId = 'test-session-2';
+      await expect(AudioService.startRecording(sessionId)).rejects.toThrow('Recording failed');
+    });
+
+    it('should handle multiple recording sessions', async () => {
+      const sessionId = 'test-session-3';
+      await AudioService.startRecording(sessionId);
+      await AudioService.stopRecording(sessionId);
+    });
+
+    beforeEach(async () => {
+      const sessionId = 'test-session';
+      await AudioService.startRecording(sessionId);
+    });
+
+    afterEach(async () => {
+      const sessionId = 'test-session';
+      await AudioService.stopRecording(sessionId);
+    });
+
+    it('should handle recording state', async () => {
+      const sessionId = 'test-session';
+      await AudioService.startRecording(sessionId);
+      expect(AudioService.getState().state).toBe(AudioServiceState.RECORDING);
+      await AudioService.stopRecording(sessionId);
+    });
+
+    it('should handle recording errors', async () => {
+      const sessionId = 'test-session';
+      await expect(AudioService.startRecording(sessionId)).rejects.toThrow('Recording failed');
     });
   });
 
@@ -249,7 +289,7 @@ describe('AudioService', () => {
         array.set(mockData);
       });
 
-      await AudioService.startRecording();
+      await AudioService.startRecording('test-session');
       await waitForStateUpdate();
 
       const state = AudioService.getState();
@@ -261,11 +301,11 @@ describe('AudioService', () => {
       await waitForStateUpdate();
       expect(AudioService.getState().state).toBe(AudioServiceState.READY);
 
-      await AudioService.startRecording();
+      await AudioService.startRecording('test-session');
       await waitForStateUpdate();
       expect(AudioService.getState().state).toBe(AudioServiceState.RECORDING);
 
-      await AudioService.stopRecording();
+      await AudioService.stopRecording('test-session');
       await waitForStateUpdate();
       expect(AudioService.getState().state).toBe(AudioServiceState.READY);
 

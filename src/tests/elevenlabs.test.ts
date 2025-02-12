@@ -1,5 +1,5 @@
 /// <reference types="vitest" />
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { synthesizeSpeech, getStreamingMetrics, resetStreamingMetrics } from '../services/elevenlabs'
 import type { Emotion } from '../components/EmotionHighlighter'
 

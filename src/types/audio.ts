@@ -32,7 +32,9 @@ export enum AudioServiceError {
   PERMISSION_DENIED = 'PERMISSION_DENIED',
   DEVICE_NOT_FOUND = 'DEVICE_NOT_FOUND',
   DEVICE_IN_USE = 'DEVICE_IN_USE',
-  SYSTEM_ERROR = 'SYSTEM_ERROR'
+  SYSTEM_ERROR = 'SYSTEM_ERROR',
+  BROWSER_UNSUPPORTED = 'BROWSER_UNSUPPORTED',
+  MEMORY_EXCEEDED = 'MEMORY_EXCEEDED'
 }
 
 // Audio error categories
@@ -44,7 +46,9 @@ export enum AudioErrorCategory {
   NETWORK = 'NETWORK',
   PERMISSION = 'PERMISSION',
   DEVICE = 'DEVICE',
-  SYSTEM = 'SYSTEM'
+  SYSTEM = 'SYSTEM',
+  BROWSER = 'BROWSER',
+  RESOURCE = 'RESOURCE'
 }
 
 // Configuration interfaces
@@ -128,6 +132,7 @@ export interface AudioServiceContext {
   vadBufferSize: number;
   noiseThreshold: number;
   silenceThreshold: number;
+  audioContext?: AudioContext;
 }
 
 export interface AudioErrorDetails {
@@ -171,7 +176,7 @@ export interface AudioServiceSession {
 }
 
 // Error recovery hints
-export const ERROR_RECOVERY_HINTS: Record<AudioServiceError, string> = {
+export const ERROR_RECOVERY_HINTS = {
   [AudioServiceError.INITIALIZATION_FAILED]: 'Check your audio device connections and browser permissions. Try refreshing the page or using a different browser.',
   [AudioServiceError.TTS_INITIALIZATION_FAILED]: 'Verify your internet connection and API key. If the issue persists, try again in a few minutes.',
   [AudioServiceError.RECORDING_FAILED]: 'Check your microphone settings and permissions. Make sure no other application is using the microphone.',
@@ -183,7 +188,7 @@ export const ERROR_RECOVERY_HINTS: Record<AudioServiceError, string> = {
   [AudioServiceError.DEVICE_NOT_FOUND]: 'Connect a microphone or audio input device. If using an external device, try reconnecting it.',
   [AudioServiceError.DEVICE_IN_USE]: 'Close other applications that might be using your microphone. Try selecting a different audio input device.',
   [AudioServiceError.SYSTEM_ERROR]: 'A system error occurred. Try refreshing the page or restarting your browser.'
-};
+} as const;
 
 export type StateTransitions = {
   [K in AudioServiceState]: {
@@ -197,11 +202,16 @@ export type AudioServiceErrorType = AudioServiceError;
 export type AudioErrorCategoryType = AudioErrorCategory;
 
 export interface AudioService {
+  setup(): Promise<void>;
+  cleanup(): Promise<void>;
   initializeTTS(sessionId: string, userRole: string): Promise<void>;
   startRecording(sessionId: string): Promise<void>;
   stopRecording(sessionId: string): Promise<RecordingResult>;
   processAudioChunk(sessionId: string, chunk: Float32Array): Promise<boolean>;
   generateSpeech(params: TTSParams): Promise<Float32Array>;
+  transcribe(audioData: ArrayBuffer): Promise<{ text: string; confidence: number }>;
+  detectEmotion(audioData: ArrayBuffer): Promise<{ type: string; confidence: number } | null>;
+  getState(): AudioServiceStateData;
 }
 
 export interface CueSignal {
@@ -237,4 +247,55 @@ export interface TTSSession {
     volume: number;
   };
   audioData?: Float32Array;
+}
+
+export interface TTSRequest {
+  text: string;
+  voice: string;
+  settings?: {
+    speed: number;
+    pitch: number;
+    volume: number;
+  };
+}
+
+export interface TTSMetrics {
+  requestId: string;
+  timestamp: number;
+  duration: number;
+  characters: number;
+  processingTime: number;
+  queueTime: number;
+  cacheHit: boolean;
+}
+
+export interface VoiceModifier {
+  speed?: number;
+  pitch?: number;
+  volume?: number;
+}
+
+export interface Voice {
+  id: string;
+  name: string;
+  language: string;
+  gender: string;
+  preview?: string;
+}
+
+export interface TTSOptions {
+  voice: string;
+  settings?: VoiceModifier;
+  cacheEnabled?: boolean;
+  priority?: 'low' | 'medium' | 'high';
+}
+
+export interface TTSCacheEntry {
+  id: string;
+  text: string;
+  voice: string;
+  settings: VoiceModifier;
+  audioData: Float32Array;
+  timestamp: number;
+  expiresAt: number;
 }

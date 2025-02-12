@@ -18,11 +18,13 @@ class MockWorker implements Worker {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onmessageerror: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
-  postMessage = vi.fn();
-  terminate = vi.fn();
-  addEventListener = vi.fn();
-  removeEventListener = vi.fn();
-  dispatchEvent = vi.fn().mockReturnValue(true);
+
+  // Bind methods to avoid unbound method errors
+  postMessage = vi.fn().bind(this);
+  terminate = vi.fn().bind(this);
+  addEventListener = vi.fn().bind(this);
+  removeEventListener = vi.fn().bind(this);
+  dispatchEvent = vi.fn().mockReturnValue(true).bind(this);
 }
 
 describe('VAD Worker', () => {

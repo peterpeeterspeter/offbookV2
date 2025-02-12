@@ -18,3 +18,15 @@ export interface EmotionMetrics {
   timingAccuracy: number;
   overallScore: number;
 }
+
+export interface EmotionStyle {
+  intensity: number;
+  duration: number;
+  transition: 'smooth' | 'abrupt';
+  confidence?: number;
+  modulation?: {
+    pitch?: number;
+    speed?: number;
+    volume?: number;
+  };
+}

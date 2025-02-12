@@ -1,4 +1,4 @@
-import { AudioService } from './audio-service';
+import type { AudioService as AudioServiceType } from '@/types/audio';
 import { ScriptAnalysisService } from './script-analysis';
 
 export interface Cue {
@@ -54,12 +54,12 @@ export interface CueResponse {
 export class CuePracticeService {
   private sessions: Map<string, CueSession>;
   private responses: Map<string, CueResponse[]>;
-  private audioService: AudioService;
+  private audioService: AudioServiceType;
   private scriptService: ScriptAnalysisService;
   private audioContext: AudioContext;
   private cueSignal?: AudioBuffer;
 
-  constructor(audioService: AudioService, scriptService: ScriptAnalysisService) {
+  constructor(audioService: AudioServiceType, scriptService: ScriptAnalysisService) {
     this.audioService = audioService;
     this.scriptService = scriptService;
     this.sessions = new Map();

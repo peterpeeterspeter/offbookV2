@@ -1,53 +1,45 @@
 export interface ServiceMetrics {
-  timestamp: number
-  service: string
+  timestamp: number;
+  service: string;
   metrics: {
-    latency: number
-    throughput: number
-    errorRate: number
+    latency: number;
+    throughput: number;
+    errorRate: number;
     resourceUsage: {
-      cpu: number
-      memory: number
-      network: number
-    }
-    customMetrics?: Record<string, number>
-  }
-  pipeline: PipelineMetrics
-  cache: {
-    hits: number
-    misses: number
-    ratio: number
-    totalRequests: number
-    averageLatency: number
-    frequentItemsRatio: number
-    uptime: number
-  }
-  streaming?: StreamingMetrics
+      cpu: number;
+      memory: number;
+      network: number;
+    };
+    customMetrics?: Record<string, number>;
+  };
+  pipeline: PipelineMetrics;
+  cache: CacheMetrics;
+  streaming?: StreamingMetrics;
 }
 
 export interface MetricsHistory {
-  serviceId: string
-  metrics: ServiceMetrics[]
+  serviceId: string;
+  metrics: ServiceMetrics[];
   aggregates: {
-    averageLatency: number
-    peakThroughput: number
-    errorRatePercentile: number
+    averageLatency: number;
+    peakThroughput: number;
+    errorRatePercentile: number;
     resourceUtilization: {
-      averageCpu: number
-      averageMemory: number
-      peakNetwork: number
-    }
-  }
+      averageCpu: number;
+      averageMemory: number;
+      peakNetwork: number;
+    };
+  };
 }
 
 export interface PerformanceAlert {
-  type: 'warning' | 'error'
-  service: string
-  metric: string
-  value: number
-  threshold: number
-  timestamp: number
-  context?: Record<string, unknown>
+  type: 'warning' | 'error';
+  service: string;
+  metric: string;
+  value: number;
+  threshold: number;
+  timestamp: number;
+  context?: Record<string, unknown>;
 }
 
 export interface PracticeMetrics {
@@ -74,49 +66,40 @@ export interface PracticeMetrics {
 }
 
 export interface PerformanceMetrics {
-  pipeline: {
-    totalRequests: number;
-    errors: number;
-    errorRate: number;
-    averageLatency: number;
-    throughput: number;
-    queueUtilization: number;
-    batchEfficiency: number;
-  };
-  cache: {
-    hits: number;
-    misses: number;
-    ratio: number;
-    totalRequests: number;
-    averageLatency: number;
-    frequentItemsRatio: number;
-    uptime: number;
-  };
-  streaming?: {
-    bufferUtilization: number;
-    streamLatency: number;
-    dropoutCount: number;
-    recoveryTime: number;
-    activeStreams: number;
-    processingTime: number;
-    networkLatency: number;
-    adaptiveBufferSize: number;
-    voiceChangeLatency: number;
-    reconnectionCount: number;
-    partialDataSize: number;
+  type: string;
+  name: string;
+  duration: number;
+  timestamp: number;
+  pipeline: PipelineMetrics;
+  cache: CacheMetrics;
+  streaming?: StreamingMetrics;
+  context?: {
+    memory?: {
+      heapUsed: number;
+      heapTotal: number;
+      heapLimit: number;
+    };
+    cpu?: {
+      usage: number;
+      cores: number;
+    };
+    battery?: {
+      level: number;
+      charging: boolean;
+    };
   };
 }
 
 export interface PipelineMetrics {
-  averageLatency: number;
-  throughput: number;
-  errorRate: number;
-  queueUtilization: number;
-  batchEfficiency: number;
   totalRequests: number;
   errors: number;
-  slowThreshold?: number;
-  slowOperations?: number;
+  errorRate: number;
+  averageLatency: number;
+  throughput: number;
+  queueUtilization: number;
+  batchEfficiency: number;
+  slowThreshold: number;
+  slowOperations: number;
 }
 
 export interface CacheMetrics {
@@ -130,6 +113,10 @@ export interface CacheMetrics {
 }
 
 export interface StreamingMetrics {
+  bitrate: number;
+  packetLoss: number;
+  jitter: number;
+  roundTripTime: number;
   bufferUtilization: number;
   streamLatency: number;
   dropoutCount: number;

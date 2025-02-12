@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { Emotion } from '../../types';
-import { cn } from '../../lib/utils';
+import React, { useEffect, useRef } from "react";
+import { Emotion } from "../../types/emotions";
+import { cn } from "../../lib/utils";
 
 interface EmotionDataPoint {
   emotion: Emotion;
@@ -23,17 +23,17 @@ const emotionYPositions: Record<Emotion, number> = {
   fear: 3,
   sadness: 4,
   disgust: 5,
-  neutral: 6
+  neutral: 6,
 };
 
 const emotionColors: Record<Emotion, string> = {
-  joy: '#FCD34D',
-  surprise: '#34D399',
-  anger: '#EF4444',
-  fear: '#8B5CF6',
-  sadness: '#3B82F6',
-  disgust: '#F97316',
-  neutral: '#9CA3AF'
+  joy: "#FCD34D",
+  surprise: "#34D399",
+  anger: "#EF4444",
+  fear: "#8B5CF6",
+  sadness: "#3B82F6",
+  disgust: "#F97316",
+  neutral: "#9CA3AF",
 };
 
 export function EmotionVisualizer({
@@ -41,7 +41,7 @@ export function EmotionVisualizer({
   width = 600,
   height = 300,
   className,
-  onHover
+  onHover,
 }: EmotionVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,20 +50,24 @@ export function EmotionVisualizer({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
     // Set up scales
-    const timeScale = width / (data.length > 1 ? data[data.length - 1].timestamp - data[0].timestamp : 1);
+    const timeScale =
+      width /
+      (data.length > 1
+        ? data[data.length - 1].timestamp - data[0].timestamp
+        : 1);
     const emotionScale = height / Object.keys(emotionYPositions).length;
 
     // Draw emotion transitions
     ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
     for (let i = 0; i < data.length - 1; i++) {
       const current = data[i];
@@ -71,8 +75,10 @@ export function EmotionVisualizer({
 
       const x1 = (current.timestamp - data[0].timestamp) * timeScale;
       const x2 = (next.timestamp - data[0].timestamp) * timeScale;
-      const y1 = emotionYPositions[current.emotion] * emotionScale + emotionScale / 2;
-      const y2 = emotionYPositions[next.emotion] * emotionScale + emotionScale / 2;
+      const y1 =
+        emotionYPositions[current.emotion] * emotionScale + emotionScale / 2;
+      const y2 =
+        emotionYPositions[next.emotion] * emotionScale + emotionScale / 2;
 
       // Draw transition line
       const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
@@ -102,9 +108,9 @@ export function EmotionVisualizer({
     }
 
     // Draw emotion labels
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
 
     Object.entries(emotionYPositions).forEach(([emotion, position]) => {
       const y = position * emotionScale + emotionScale / 2;
@@ -119,14 +125,21 @@ export function EmotionVisualizer({
 
     const rect = containerRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const timeScale = width / (data.length > 1 ? data[data.length - 1].timestamp - data[0].timestamp : 1);
+    const timeScale =
+      width /
+      (data.length > 1
+        ? data[data.length - 1].timestamp - data[0].timestamp
+        : 1);
 
     // Find closest data point
-    const closestPoint = data.reduce((closest, point) => {
-      const pointX = (point.timestamp - data[0].timestamp) * timeScale;
-      const distance = Math.abs(pointX - x);
-      return distance < closest.distance ? { point, distance } : closest;
-    }, { point: null as EmotionDataPoint | null, distance: Infinity });
+    const closestPoint = data.reduce(
+      (closest, point) => {
+        const pointX = (point.timestamp - data[0].timestamp) * timeScale;
+        const distance = Math.abs(pointX - x);
+        return distance < closest.distance ? { point, distance } : closest;
+      },
+      { point: null as EmotionDataPoint | null, distance: Infinity }
+    );
 
     onHover(closestPoint.point);
   };
@@ -138,7 +151,7 @@ export function EmotionVisualizer({
   return (
     <div
       ref={containerRef}
-      className={cn('relative', className)}
+      className={cn("relative", className)}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -150,5 +163,4 @@ export function EmotionVisualizer({
       />
     </div>
   );
-} 
-
+}

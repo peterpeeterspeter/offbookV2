@@ -1,28 +1,51 @@
-import { Service, ServiceError } from '../service-integration';
+import type { Service } from '@/types/core';
+import type { TTSRequest, TTSMetrics } from '@/types/audio';
+import { ServiceError } from '../service-integration';
 import {
   ExternalService,
   ExternalServiceConfig,
   ExternalServiceMetrics,
-  TTSRequest,
   TTSResponse,
-  TTSServiceType,
-  TTSMetrics
+  TTSServiceType
 } from './types';
+
+export interface TTSService extends Service {
+  initialize(dependencies: Record<string, Service>): Promise<void>;
+  synthesize(text: string): Promise<ArrayBuffer>;
+  getMetrics(): TTSMetrics;
+  dispose(): Promise<void>;
+  setup(): Promise<void>;
+  cleanup(): Promise<void>;
+}
 
 /**
  * Implementation of the TTS service
  */
-export class TTSService implements Service {
+export class TTSServiceImpl implements TTSService {
   [key: string]: unknown;
 
   private apiKey: string | null = null;
   private isConnected = false;
+  private isInitialized: boolean = false;
+  private defaultVoiceId = '21m00Tcm4TlvDq8ikWAM';  // Default voice ID for testing
   private metrics: TTSMetrics = {
-    requestCount: 0,
-    errorCount: 0,
-    averageLatency: 0,
-    totalLatency: 0
+    requestId: '',
+    timestamp: Date.now(),
+    duration: 0,
+    characters: 0,
+    processingTime: 0,
+    queueTime: 0,
+    cacheHit: false
   };
+
+  async setup(): Promise<void> {
+    // Setup implementation
+  }
+
+  async cleanup(): Promise<void> {
+    // Cleanup implementation
+    await this.dispose();
+  }
 
   async initialize(dependencies: Record<string, Service>): Promise<void> {
     const config = dependencies.config as { settings?: { apiKey?: string } };
@@ -31,37 +54,47 @@ export class TTSService implements Service {
       throw new ServiceError('INVALID_API_KEY', 'API key is required');
     }
     this.apiKey = apiKey;
-    this.isConnected = true;
+    this.isInitialized = true;
+    this.isConnected = true;  // Set connected since we verified the API key
   }
 
-  async synthesize(text: string): Promise<TTSResponse> {
+  async synthesize(text: string): Promise<ArrayBuffer> {
+    const startTime = Date.now();
+
+    // Update basic metrics before any validation
+    this.metrics = {
+      requestId: Math.random().toString(36).substring(7),
+      timestamp: startTime,
+      duration: 0,
+      characters: text ? text.length : 0,
+      processingTime: 0,
+      queueTime: 0,
+      cacheHit: false
+    };
+
+    if (!this.isInitialized) {
+      throw new ServiceError('NOT_INITIALIZED', 'TTS service not initialized');
+    }
+
     if (!this.isConnected || !this.apiKey) {
-      this.metrics.errorCount++;
       throw new ServiceError('NOT_CONNECTED', 'TTS service not connected');
     }
 
     if (!text || typeof text !== 'string') {
-      this.metrics.errorCount++;
       throw new ServiceError('INVALID_INPUT', 'Invalid text input');
     }
 
-    const startTime = Date.now();
+    const queueStartTime = Date.now();
 
     try {
-      const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech', {
+      const processingStartTime = Date.now();
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.defaultVoiceId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'xi-api-key': this.apiKey
         },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_monolingual_v1',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75
-          }
-        })
+        body: JSON.stringify({ text })
       });
 
       if (!response.ok) {
@@ -70,24 +103,24 @@ export class TTSService implements Service {
 
       const audioData = await response.arrayBuffer();
       const endTime = Date.now();
-      const latency = endTime - startTime;
 
-      // Update metrics
-      this.metrics.requestCount++;
-      this.metrics.totalLatency += latency;
-      this.metrics.averageLatency = this.metrics.totalLatency / this.metrics.requestCount;
-
-      return {
-        audioData,
-        duration: latency,
-        format: 'audio/mpeg'
+      // Update metrics with timing information
+      this.metrics = {
+        ...this.metrics,
+        duration: endTime - startTime,
+        processingTime: endTime - processingStartTime,
+        queueTime: processingStartTime - queueStartTime
       };
+
+      return audioData;
     } catch (error) {
-      this.metrics.errorCount++;
-      if (error instanceof Error) {
-        throw new ServiceError('SYNTHESIS_ERROR', `TTS synthesis failed: ${error.message}`);
-      }
-      throw new ServiceError('SYNTHESIS_ERROR', 'TTS synthesis failed');
+      // Update metrics with final duration
+      const endTime = Date.now();
+      this.metrics = {
+        ...this.metrics,
+        duration: endTime - startTime
+      };
+      throw new ServiceError('SYNTHESIS_ERROR', error instanceof Error ? error.message : 'Failed to synthesize speech');
     }
   }
 
@@ -98,5 +131,9 @@ export class TTSService implements Service {
   async dispose(): Promise<void> {
     this.isConnected = false;
     this.apiKey = null;
+    this.isInitialized = false;
   }
 }
+
+// Export singleton instance
+export const ttsService = new TTSServiceImpl();

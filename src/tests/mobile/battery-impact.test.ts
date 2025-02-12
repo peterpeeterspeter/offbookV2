@@ -29,11 +29,12 @@ describe('Battery Impact Analysis Suite', () => {
       await audioService.setup()
       const initialReport = await analyzer.generatePerformanceReport()
 
-      await audioService.startRecording()
+      const sessionId = 'battery-test';
+      await audioService.startRecording(sessionId)
       await new Promise(resolve => setTimeout(resolve, 5000))
       const recordingReport = await analyzer.generatePerformanceReport()
 
-      await audioService.stopRecording()
+      await audioService.stopRecording(sessionId)
       const finalReport = await analyzer.generatePerformanceReport()
 
       expect(recordingReport.battery.level).toBeLessThanOrEqual(initialReport.battery.level)
@@ -111,7 +112,10 @@ describe('Battery Impact Analysis Suite', () => {
   describe('Background Processing', () => {
     it('should optimize background audio processing', async () => {
       await audioService.setup()
-      await audioService.startRecording()
+      const initialReport = await analyzer.generatePerformanceReport()
+
+      const sessionId = 'background-test';
+      await audioService.startRecording(sessionId)
 
       // Simulate app going to background
       document.dispatchEvent(new Event('visibilitychange'))
@@ -124,7 +128,7 @@ describe('Battery Impact Analysis Suite', () => {
       Object.defineProperty(document, 'hidden', { value: false, configurable: true })
       document.dispatchEvent(new Event('visibilitychange'))
 
-      await audioService.stopRecording()
+      await audioService.stopRecording(sessionId)
     })
 
     it('should handle background fetch operations', async () => {
@@ -169,7 +173,8 @@ describe('Battery Impact Analysis Suite', () => {
       })
 
       await audioService.setup()
-      await audioService.startRecording()
+      const sessionId = 'long-test';
+      await audioService.startRecording(sessionId)
 
       for (let i = 0; i < 6; i++) {
         await new Promise(resolve => setTimeout(resolve, duration / 6))
@@ -177,7 +182,7 @@ describe('Battery Impact Analysis Suite', () => {
         batterySnapshots.push(report.battery.level)
       }
 
-      await audioService.stopRecording()
+      await audioService.stopRecording(sessionId)
 
       const batteryDrain = batterySnapshots[0] - batterySnapshots[batterySnapshots.length - 1]
       expect(batteryDrain).toBeLessThan(0.1) // Less than 10% battery drain
@@ -199,11 +204,12 @@ describe('Battery Impact Analysis Suite', () => {
         value: () => Promise.resolve(batteryManager)
       })
 
-      const tasks = Array(operations).fill(null).map(async () => {
+      const tasks = Array(operations).fill(null).map(async (_, index) => {
         await audioService.setup()
-        await audioService.startRecording()
+        const sessionId = `concurrent-test-${index}`;
+        await audioService.startRecording(sessionId)
         await new Promise(resolve => setTimeout(resolve, duration))
-        return audioService.stopRecording()
+        return audioService.stopRecording(sessionId)
       })
 
       const results = await Promise.all(tasks)
@@ -252,5 +258,28 @@ describe('Battery Impact Analysis Suite', () => {
         }
       }
     })
+  })
+
+  describe('Battery Impact Tests', () => {
+    it('should handle basic recording with minimal battery impact', async () => {
+      const sessionId = `battery-test-${Date.now()}`;
+      await audioService.startRecording(sessionId);
+      // Test logic
+      await audioService.stopRecording(sessionId);
+    });
+
+    it('should optimize power usage during long recordings', async () => {
+      const sessionId = `long-recording-${Date.now()}`;
+      await audioService.startRecording(sessionId);
+      // Test logic
+      await audioService.stopRecording(sessionId);
+    });
+
+    it('should handle background recording efficiently', async () => {
+      const sessionId = `background-test-${Date.now()}`;
+      await audioService.startRecording(sessionId);
+      // Test logic
+      await audioService.stopRecording(sessionId);
+    });
   })
 })

@@ -15,7 +15,7 @@ describe('AccessibilityTester', () => {
       <div role="alert" aria-live="polite">Error message</div>
     `
 
-    const report = await tester.checkARIACompliance()
+    const report = await tester.test()
     expect(report.ariaLabels.missing).toHaveLength(0)
     expect(report.ariaLabels.valid).toBeGreaterThan(0)
   })
@@ -26,7 +26,7 @@ describe('AccessibilityTester', () => {
       <div style="color: #777; background-color: #888">Low contrast</div>
     `
 
-    const report = await tester.checkColorContrast()
+    const report = await tester.test()
     expect(report.contrastIssues).toHaveLength(1)
     expect(report.validElements).toHaveLength(1)
   })
@@ -37,7 +37,7 @@ describe('AccessibilityTester', () => {
       <button style="width: 20px; height: 20px">Too small</button>
     `
 
-    const report = await tester.checkTouchTargets()
+    const report = await tester.test()
     expect(report.smallTargets).toHaveLength(1)
     expect(report.validTargets).toHaveLength(1)
   })
@@ -49,7 +49,7 @@ describe('AccessibilityTester', () => {
       <button>Last</button>
     `
 
-    const report = await tester.checkKeyboardNavigation()
+    const report = await tester.test()
     expect(report.focusableElements).toHaveLength(3)
     expect(report.focusOrder).toBeDefined()
   })
@@ -60,7 +60,7 @@ describe('AccessibilityTester', () => {
       <img src="missing.jpg">
     `
 
-    const report = await tester.checkScreenReaderCompatibility()
+    const report = await tester.test()
     expect(report.missingAltText).toHaveLength(1)
     expect(report.validAlternativeText).toHaveLength(1)
   })
@@ -70,8 +70,9 @@ describe('AccessibilityTester', () => {
     element.addEventListener('touchstart', () => {})
     element.addEventListener('touchmove', () => {})
     element.addEventListener('touchend', () => {})
+    document.body.appendChild(element)
 
-    const report = await tester.checkGestureHandling(element)
+    const report = await tester.test()
     expect(report.gestureHandlers).toMatchObject({
       tap: true,
       swipe: true,
@@ -86,13 +87,13 @@ describe('AccessibilityTester', () => {
     const element = document.getElementById('updates')!
     element.textContent = 'New content'
 
-    const report = await tester.checkDynamicUpdates()
+    const report = await tester.test()
     expect(report.ariaLiveRegions).toHaveLength(1)
     expect(report.updateAnnouncements).toHaveLength(1)
   })
 
   it('should verify orientation handling', async () => {
-    const report = await tester.checkOrientationSupport()
+    const report = await tester.test()
     expect(report.orientationLock).toBeDefined()
     expect(report.responsiveLayout).toBeDefined()
   })

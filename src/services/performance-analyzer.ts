@@ -1,4 +1,4 @@
-import type { PerformanceMetrics, StreamingMetrics } from '@/types/streaming'
+import type { PerformanceMetrics, StreamingMetrics, PipelineMetrics, CacheMetrics } from '@/types/metrics'
 import type { ServiceMetrics } from '@/types/metrics'
 
 export class PerformanceAnalyzer {
@@ -8,7 +8,32 @@ export class PerformanceAnalyzer {
   private readonly MEMORY_THRESHOLD = 50 * 1024 * 1024 // 50MB
   private readonly CPU_THRESHOLD = 80 // 80%
   private readonly LATENCY_THRESHOLD = 200 // 200ms
-  private metrics: PerformanceMetrics[] = []
+  private metrics: PerformanceMetrics = {
+    type: 'system',
+    name: 'performance',
+    duration: 0,
+    timestamp: Date.now(),
+    pipeline: {
+      totalRequests: 0,
+      errors: 0,
+      errorRate: 0,
+      averageLatency: 0,
+      throughput: 0,
+      queueUtilization: 0,
+      batchEfficiency: 0,
+      slowThreshold: 100,
+      slowOperations: 0
+    },
+    cache: {
+      hits: 0,
+      misses: 0,
+      ratio: 0,
+      totalRequests: 0,
+      averageLatency: 0,
+      frequentItemsRatio: 0,
+      uptime: 0
+    }
+  }
 
   async processData(data: unknown[]): Promise<void> {
     const snapshot = performance.memory?.usedJSHeapSize || 0
@@ -21,7 +46,7 @@ export class PerformanceAnalyzer {
     // Process data and monitor performance
     await this.trackPerformance(() => {
       // Simulated data processing
-      return new Promise(resolve => setTimeout(resolve, 100))
+      return new Promise<void>(resolve => setTimeout(resolve, 100))
     })
   }
 
@@ -56,7 +81,15 @@ export class PerformanceAnalyzer {
     const network = await this.getNetworkStats()
 
     return {
+      type: 'system',
+      name: 'performance',
+      duration: 0,
+      timestamp: Date.now(),
       pipeline: {
+        totalRequests: 0,
+        errors: 0,
+        slowThreshold: 100,
+        slowOperations: 0,
         averageLatency: network.latency,
         throughput: network.bandwidth,
         errorRate: 0,
@@ -64,7 +97,9 @@ export class PerformanceAnalyzer {
         batchEfficiency: 0.95
       },
       cache: {
-        hitRate: 0.85,
+        hits: 850,
+        misses: 150,
+        ratio: 0.85,
         totalRequests: 1000,
         averageLatency: 50,
         frequentItemsRatio: 0.7,
@@ -152,12 +187,12 @@ export class PerformanceAnalyzer {
   }
 
   async generatePerformanceReport(): Promise<{
-    memory: ReturnType<PerformanceAnalyzer['getMemoryStats']>;
+    memory: Promise<{ heapUsed: number; heapTotal: number; heapLimit: number }>;
     battery: { level: number; charging: boolean };
     streaming: StreamingMetrics;
     resources: {
-      cpu: ReturnType<PerformanceAnalyzer['trackCPUUsage']>;
-      network: ReturnType<PerformanceAnalyzer['getNetworkStats']>;
+      cpu: Promise<{ percentage: number }>;
+      network: Promise<{ bandwidth: number; latency: number }>;
     };
   }> {
     const [memory, battery, cpu, network] = await Promise.all([
@@ -168,12 +203,16 @@ export class PerformanceAnalyzer {
     ])
 
     return {
-      memory,
+      memory: Promise.resolve(memory),
       battery: {
         level: battery.level,
         charging: battery.charging
       },
       streaming: {
+        bitrate: 1000,
+        packetLoss: 0.01,
+        jitter: 15,
+        roundTripTime: 100,
         bufferUtilization: 0.75,
         streamLatency: await this.measureStreamLatency(),
         dropoutCount: 0,
@@ -187,8 +226,8 @@ export class PerformanceAnalyzer {
         partialDataSize: 512
       },
       resources: {
-        cpu,
-        network
+        cpu: Promise.resolve(cpu),
+        network: Promise.resolve(network)
       }
     }
   }
@@ -262,5 +301,19 @@ export class PerformanceAnalyzer {
   private async checkAdaptiveBuffering(): Promise<boolean> {
     // Simulate adaptive buffering check
     return true
+  }
+
+  private getPipelineMetrics(): PipelineMetrics {
+    return {
+      totalRequests: this.metrics.pipeline.totalRequests,
+      errors: this.metrics.pipeline.errors,
+      slowThreshold: this.metrics.pipeline.slowThreshold,
+      slowOperations: this.metrics.pipeline.slowOperations,
+      averageLatency: this.metrics.pipeline.averageLatency,
+      throughput: this.metrics.pipeline.throughput,
+      errorRate: this.metrics.pipeline.errorRate,
+      queueUtilization: this.metrics.pipeline.queueUtilization,
+      batchEfficiency: this.metrics.pipeline.batchEfficiency
+    }
   }
 }

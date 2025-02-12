@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "../../lib/utils";
+import { LineAnnotation } from "../../types/annotations";
 
 type Emotion =
   | "joy"
@@ -22,6 +23,7 @@ interface ScriptLineProps {
     startTime?: string;
   };
   onLineClick?: () => void;
+  annotations?: LineAnnotation[];
 }
 
 const emotionColors: Record<
@@ -70,6 +72,7 @@ export function ScriptLine({
   isCompleted = false,
   timing,
   onLineClick,
+  annotations,
 }: ScriptLineProps) {
   const colors = emotionColors[emotion];
 

@@ -1,19 +1,33 @@
-import { render as rtlRender, RenderResult } from "@testing-library/react";
-import { type ComponentType, type ReactElement } from "react";
+import React from "react";
+import {
+  render as testingLibraryRender,
+  RenderOptions,
+  RenderResult,
+} from "@testing-library/react";
+import { ThemeProvider } from "@/components/theme-provider";
 
-// Custom render function that handles React component types correctly
-interface CustomRenderOptions {
-  wrapper?: ComponentType<any>;
+interface AllTheProviders {
+  children: React.ReactNode;
 }
 
-export function render(
-  ui: ReactElement,
-  { wrapper: Wrapper, ...options }: CustomRenderOptions = {}
-): RenderResult {
-  const wrapped = Wrapper ? <Wrapper>{ui}</Wrapper> : ui;
-  return rtlRender(wrapped, options);
-}
+const AllTheProviders: React.FC<AllTheProviders> = ({ children }) => {
+  return <ThemeProvider>{children}</ThemeProvider>;
+};
+
+type CustomRenderOptions = Omit<RenderOptions, "wrapper">;
+
+const customRender = (
+  ui: React.ReactNode,
+  options: CustomRenderOptions = {}
+): RenderResult => {
+  return testingLibraryRender(ui, {
+    wrapper: AllTheProviders,
+    ...options,
+  });
+};
 
 // Re-export everything
 export * from "@testing-library/react";
-export { render };
+
+// Override render method
+export { customRender as render };

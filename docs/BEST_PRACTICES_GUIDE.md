@@ -210,6 +210,50 @@ function App() {
 }
 ```
 
+### 4. Radix UI Component Types
+
+When working with Radix UI components, follow these patterns for proper type safety:
+
+```typescript
+// 1. Define element refs using React.ElementRef
+type DialogOverlayElement = React.ElementRef<typeof DialogPrimitive.Overlay>;
+type DialogContentElement = React.ElementRef<typeof DialogPrimitive.Content>;
+
+// 2. Use the primitive's props directly
+const DialogOverlay = React.forwardRef<
+  DialogOverlayElement,
+  DialogPrimitive.DialogOverlayProps
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Overlay
+    ref={ref}
+    className={cn("your-classes", className)}
+    {...props}
+  />
+));
+
+// 3. For custom props, extend the primitive's props
+interface CustomDialogProps extends DialogPrimitive.DialogProps {
+  customProp?: string;
+}
+
+// 4. Maintain proper displayNames for DevTools
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
+
+// 5. Export all components with their proper types
+export {
+  Dialog,
+  DialogContent,
+  // ... other components
+} from "./your-component-file";
+```
+
+This pattern ensures:
+
+- Proper type inference for refs and props
+- Compatibility with Radix UI's component types
+- Maintainable and scalable component architecture
+- Correct type checking for component props
+
 ## Mobile Development
 
 ### 1. Touch Interactions

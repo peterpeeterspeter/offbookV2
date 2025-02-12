@@ -1,7 +1,7 @@
 import type { AudioServiceType } from "@/components/SceneFlow";
 import { AudioStateManager } from './audio-state';
 import type { AudioServiceStateData } from './audio-state';
-import { AudioServiceState, AudioServiceEvent, AudioServiceError } from '@/types/audio';
+import { AudioServiceState, AudioServiceEvent, AudioServiceError, AudioErrorCategory } from '@/types/audio';
 import type {
   AudioConfig,
   RecordingResult,
@@ -13,10 +13,14 @@ import type {
   TTSSession,
   CueSignal,
   CueDisplay,
-  SceneProgression
+  SceneProgression,
+  AudioErrorDetails,
+  VADState,
+  AudioService
 } from '@/types/audio';
 import { VADService } from './vad-service';
 import { createMockBlobAsync } from '../tests/mocks/browser-apis';
+import { ServiceError } from './service-integration';
 
 // Type declaration for WebKit AudioContext
 declare global {
@@ -90,7 +94,7 @@ const ElevenLabs = MockElevenLabs;
  * Implementation of the audio service handling recording, playback,
  * and text-to-speech functionality for script rehearsal
  */
-class AudioServiceImpl implements AudioServiceType {
+export class AudioServiceImpl implements AudioService {
   private static instance: AudioServiceImpl;
   private audioContext: AudioContext | null = null;
   private mediaRecorder: MediaRecorder | null = null;
@@ -100,13 +104,18 @@ class AudioServiceImpl implements AudioServiceType {
   private vadService: VADService | null = null;
   private isCleaningUp = false;
   private currentSession: RecordingSession | null = null;
+  private ttsInitialized = false;
 
   private constructor() {
     this.stateManager = AudioStateManager.getInstance();
     this.stateManager.restore();
+    this.initializeState();
+  }
+
+  private initializeState(): void {
     this.stateManager.transition(AudioServiceEvent.INITIALIZE, {
       state: AudioServiceState.UNINITIALIZED,
-      error: null,
+      error: undefined,
       context: {
         sampleRate: 44100,
         channels: 2,
@@ -119,10 +128,6 @@ class AudioServiceImpl implements AudioServiceType {
         silenceThreshold: 0.1
       }
     });
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', this.cleanup.bind(this));
-    }
   }
 
   static getInstance(): AudioServiceImpl {
@@ -145,13 +150,9 @@ class AudioServiceImpl implements AudioServiceType {
 
       this.stateManager.transition(AudioServiceEvent.INITIALIZE);
 
-      if (typeof window === 'undefined') {
-        throw new Error('Audio is only supported in browser environments');
-      }
-
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextClass) {
-        throw new Error('AudioContext not supported in this environment');
+        throw new ServiceError('INITIALIZATION_FAILED', 'AudioContext not supported in this environment');
       }
 
       this.audioContext = new AudioContextClass();
@@ -165,7 +166,7 @@ class AudioServiceImpl implements AudioServiceType {
           }
         });
       } catch (error) {
-        throw new Error('Failed to access microphone');
+        throw new ServiceError('INITIALIZATION_FAILED', 'Failed to access microphone');
       }
 
       const state = this.stateManager.getState();
@@ -178,7 +179,7 @@ class AudioServiceImpl implements AudioServiceType {
       console.error('Audio setup failed:', error);
       this.stateManager.transition(AudioServiceEvent.ERROR, {
         error: this.stateManager.createError(AudioServiceError.INITIALIZATION_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
+          originalError: error instanceof Error ? error : new ServiceError('UNKNOWN_ERROR', String(error))
         })
       });
       throw error;
@@ -219,10 +220,31 @@ class AudioServiceImpl implements AudioServiceType {
     }
   }
 
+  async initializeTTS(sessionId: string, userRole: string): Promise<void> {
+    if (this.ttsInitialized) {
+      return;
+    }
+
+    try {
+      await this.setup();
+      this.ttsInitialized = true;
+    } catch (error) {
+      const errorDetails: AudioErrorDetails = {
+        name: 'TTS Initialization',
+        code: AudioServiceError.TTS_INITIALIZATION_FAILED,
+        category: AudioErrorCategory.INITIALIZATION,
+        message: error instanceof Error ? error.message : 'Failed to initialize TTS',
+        retryable: true
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
+      throw error;
+    }
+  }
+
   async startRecording(sessionId: string): Promise<void> {
     try {
       if (!this.mediaStream || !this.audioContext) {
-        throw new Error('Audio service not initialized');
+        await this.setup();
       }
 
       if (this.stateManager.getState().state === AudioServiceState.RECORDING) {
@@ -237,151 +259,126 @@ class AudioServiceImpl implements AudioServiceType {
         audioData: new Float32Array()
       };
 
-      this.mediaRecorder = new MediaRecorder(this.mediaStream);
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.audioChunks.push(event.data);
-        }
-      };
-
-      this.mediaRecorder.start();
       this.stateManager.transition(AudioServiceEvent.RECORDING_START);
+
+      if (this.mediaStream) {
+        this.mediaRecorder = new MediaRecorder(this.mediaStream);
+        this.mediaRecorder.ondataavailable = this.handleDataAvailable.bind(this);
+        this.mediaRecorder.start();
+      } else {
+        throw new Error('Media stream not available');
+      }
     } catch (error) {
-      console.error('Failed to start recording:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.RECORDING_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
-        })
-      });
+      const errorDetails: AudioErrorDetails = {
+        name: 'Recording Start',
+        code: AudioServiceError.RECORDING_FAILED,
+        category: AudioErrorCategory.RECORDING,
+        message: error instanceof Error ? error.message : 'Failed to start recording',
+        retryable: true
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
       throw error;
     }
   }
 
   async stopRecording(sessionId: string): Promise<RecordingResult> {
     try {
-      if (!this.mediaRecorder || !this.currentSession || this.currentSession.id !== sessionId) {
+      if (!this.mediaRecorder || !this.currentSession) {
         throw new Error('No active recording session');
       }
 
-      return new Promise((resolve, reject) => {
-        this.mediaRecorder!.onstop = async () => {
-          try {
-            const blob = new Blob(this.audioChunks, { type: 'audio/webm' });
-            const arrayBuffer = await blob.arrayBuffer();
-            const audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer);
-            const audioData = audioBuffer.getChannelData(0);
+      this.mediaRecorder.stop();
+      this.stateManager.transition(AudioServiceEvent.RECORDING_STOP);
 
-            const duration = Date.now() - this.currentSession!.startTime;
-            const result: RecordingResult = {
-              id: sessionId,
-              startTime: this.currentSession!.startTime,
-              audioData,
-              duration
-            };
+      const audioData = await this.processRecordedAudio();
+      const duration = Date.now() - this.currentSession.startTime;
 
-            this.stateManager.transition(AudioServiceEvent.RECORDING_STOP);
-            this.currentSession = null;
-            this.audioChunks = [];
+      const result: RecordingResult = {
+        id: sessionId,
+        startTime: this.currentSession.startTime,
+        audioData,
+        duration
+      };
 
-            resolve(result);
-          } catch (error) {
-            reject(error);
-          }
-        };
-
-        this.mediaRecorder!.stop();
-      });
+      this.currentSession = null;
+      return result;
     } catch (error) {
-      console.error('Failed to stop recording:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.RECORDING_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
-        })
-      });
-      throw error;
-    }
-  }
-
-  async initializeTTS(sessionId: string, userRole: string): Promise<void> {
-    try {
-      if (!this.audioContext) {
-        throw new Error('Audio service not initialized');
-      }
-
-      // In a real implementation, this would initialize the TTS service
-      // with the appropriate voice for the user's role
-      console.log(`Initializing TTS for session ${sessionId} with role ${userRole}`);
-    } catch (error) {
-      console.error('Failed to initialize TTS:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.TTS_INITIALIZATION_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
-        })
-      });
+      const errorDetails: AudioErrorDetails = {
+        name: 'Recording Stop',
+        code: AudioServiceError.RECORDING_FAILED,
+        category: AudioErrorCategory.RECORDING,
+        message: error instanceof Error ? error.message : 'Failed to stop recording',
+        retryable: true
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
       throw error;
     }
   }
 
   async processAudioChunk(sessionId: string, chunk: Float32Array): Promise<boolean> {
     try {
-      if (!this.audioContext) {
-        throw new Error('Audio service not initialized');
+      const vadService = this.vadService;
+      if (!vadService) {
+        return false;
       }
 
-      const state = this.stateManager.getState();
-      if (state.state !== AudioServiceState.RECORDING) {
-        throw new Error('Audio service not in recording state');
-      }
+      return new Promise<boolean>(async (resolve) => {
+        const removeListener = vadService.addStateListener((state) => {
+          removeListener();
+          resolve(state.speaking);
+        });
 
-      // Process the chunk through VAD if enabled
-      if (state.context.vadEnabled && this.vadService) {
-        // VAD service processes audio automatically through its audio processor
-        // We just need to check the current state
-        const vadState = state.vad;
-        return vadState?.speaking ?? true;
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Failed to process audio chunk:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.PROCESSING_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
-        })
+        await vadService.start();
       });
+    } catch (error) {
+      const errorDetails: AudioErrorDetails = {
+        name: 'Audio Processing',
+        code: AudioServiceError.PROCESSING_FAILED,
+        category: AudioErrorCategory.PROCESSING,
+        message: error instanceof Error ? error.message : 'Failed to process audio chunk',
+        retryable: true
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
       throw error;
     }
   }
 
   async generateSpeech(params: TTSParams): Promise<Float32Array> {
     try {
-      if (!this.audioContext) {
-        throw new Error('Audio service not initialized');
-      }
-
-      // Create a temporary buffer for the generated speech
-      const sampleRate = this.audioContext.sampleRate;
-      const duration = 2; // Default duration in seconds
-      const buffer = this.audioContext.createBuffer(1, sampleRate * duration, sampleRate);
-      const channelData = buffer.getChannelData(0);
-
-      // Generate a simple sine wave as a placeholder
-      // In a real implementation, this would call the TTS service
-      const frequency = 440; // A4 note
-      for (let i = 0; i < channelData.length; i++) {
-        channelData[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate);
-      }
-
-      return channelData;
+      // Mock implementation - replace with actual TTS service
+      const audioData = new Float32Array(1024).fill(0);
+      return audioData;
     } catch (error) {
-      console.error('Failed to generate speech:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.TTS_INITIALIZATION_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
-        })
-      });
+      const errorDetails: AudioErrorDetails = {
+        name: 'Speech Generation',
+        code: AudioServiceError.PROCESSING_FAILED,
+        category: AudioErrorCategory.PROCESSING,
+        message: error instanceof Error ? error.message : 'Failed to generate speech',
+        retryable: true
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
       throw error;
     }
+  }
+
+  private async handleDataAvailable(event: BlobEvent): Promise<void> {
+    if (event.data.size > 0) {
+      this.audioChunks.push(event.data);
+    }
+  }
+
+  private async processRecordedAudio(): Promise<Float32Array> {
+    const blob = new Blob(this.audioChunks, { type: 'audio/webm' });
+    const audioData = await this.convertBlobToFloat32Array(blob);
+    this.audioChunks = [];
+    return audioData;
+  }
+
+  private async convertBlobToFloat32Array(blob: Blob): Promise<Float32Array> {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    return audioBuffer.getChannelData(0);
   }
 
   async cleanup(): Promise<void> {
@@ -426,9 +423,58 @@ class AudioServiceImpl implements AudioServiceType {
   getState(): AudioServiceStateData {
     return this.stateManager.getState();
   }
+
+  async transcribe(audioData: ArrayBuffer): Promise<{ text: string; confidence: number }> {
+    try {
+      const result = await fetch('https://api.whisper.ai/v1/transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream'
+        },
+        body: audioData
+      });
+
+      if (!result.ok) {
+        throw new ServiceError('TRANSCRIPTION_FAILED', 'Transcription request failed');
+      }
+
+      const data = await result.json();
+      return {
+        text: data.text,
+        confidence: data.confidence
+      };
+    } catch (error) {
+      throw new ServiceError('TRANSCRIPTION_FAILED', error instanceof Error ? error.message : 'Failed to transcribe audio');
+    }
+  }
+
+  async detectEmotion(audioData: ArrayBuffer): Promise<{ type: string; confidence: number } | null> {
+    try {
+      const result = await fetch('https://api.emotion.ai/v1/detect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream'
+        },
+        body: audioData
+      });
+
+      if (!result.ok) {
+        throw new ServiceError('EMOTION_DETECTION_FAILED', 'Emotion detection request failed');
+      }
+
+      const data = await result.json();
+      return {
+        type: data.emotion,
+        confidence: data.confidence
+      };
+    } catch (error) {
+      throw new ServiceError('EMOTION_DETECTION_FAILED', error instanceof Error ? error.message : 'Failed to detect emotion');
+    }
+  }
 }
 
 /**
  * Singleton instance of the audio service
  */
-export const AudioService = AudioServiceImpl.getInstance();
+const audioServiceInstance = AudioServiceImpl.getInstance();
+export { audioServiceInstance as AudioService };

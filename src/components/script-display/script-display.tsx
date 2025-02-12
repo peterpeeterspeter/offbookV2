@@ -1,11 +1,12 @@
 import React, { useRef, useEffect, useState } from "react";
 import { ScriptLine } from "./script-line";
-import { Emotion } from "../../types";
+import { Emotion } from "../../types/emotions";
 import { cn } from "../../lib/utils";
 import { PerformanceOverlay } from "./performance-overlay";
 import { EmotionVisualizer } from "./emotion-visualizer";
 import { KeyboardShortcuts } from "./keyboard-shortcuts";
 import { PracticeModeManager } from "./practice-mode-manager";
+import { LineAnnotation } from "../../types/annotations";
 
 export interface ScriptLine {
   id: string;
@@ -55,12 +56,6 @@ const PRACTICE_MODES: PracticeMode[] = [
     description: "Practice with lines temporarily hidden",
   },
 ];
-
-interface LineAnnotation {
-  lineId: string;
-  text: string;
-  timestamp: number;
-}
 
 interface PracticeModeConfig {
   showNextLines: boolean;
@@ -118,7 +113,9 @@ export function ScriptDisplay({
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [practiceMode, setPracticeMode] = useState<string>("standard");
-  const [annotations, setAnnotations] = useState<LineAnnotation[]>([]);
+  const [annotations, setAnnotations] = useState<
+    Record<string, LineAnnotation[]>
+  >({});
   const [showAnnotationInput, setShowAnnotationInput] = useState<string | null>(
     null
   );
@@ -193,7 +190,7 @@ export function ScriptDisplay({
           break;
         case "n":
           e.preventDefault();
-          setShowAnnotationInput(currentLineId);
+          setShowAnnotationInput(currentLineId ?? null);
           break;
         case "?":
           e.preventDefault();
@@ -223,16 +220,16 @@ export function ScriptDisplay({
   ]);
 
   const addAnnotation = (lineId: string, text: string) => {
-    setAnnotations((prev) => [
+    const newAnnotation: LineAnnotation = {
+      id: `${lineId}-${Date.now()}`,
+      text,
+      timestamp: Date.now(),
+      author: "user", // TODO: Replace with actual user ID when auth is implemented
+    };
+    setAnnotations((prev) => ({
       ...prev,
-      {
-        lineId,
-        text,
-        timestamp: Date.now(),
-      },
-    ]);
-    setShowAnnotationInput(null);
-    setAnnotationText("");
+      [lineId]: [...(prev[lineId] || []), newAnnotation],
+    }));
   };
 
   // Update visible lines based on practice mode
@@ -264,6 +261,10 @@ export function ScriptDisplay({
         onLineSelect?.(lines[currentIndex + 1].id);
       }
     }
+  };
+
+  const handleAnnotationClick = (currentLineId?: string) => {
+    setShowAnnotationInput(currentLineId ?? null);
   };
 
   return (
@@ -339,8 +340,7 @@ export function ScriptDisplay({
 
             return (
               <ScriptLine
-                key={line.id}
-                id={`script-line-${line.id}`}
+                key={`script-line-${line.id}`}
                 text={line.text}
                 emotion={line.emotion}
                 intensity={line.intensity}
@@ -348,7 +348,7 @@ export function ScriptDisplay({
                 isCurrent={line.id === currentLineId}
                 isCompleted={completedLineIds.includes(line.id)}
                 onLineClick={() => onLineSelect?.(line.id)}
-                annotations={annotations.filter((a) => a.lineId === line.id)}
+                annotations={annotations[line.id] || []}
               />
             );
           })}

@@ -1,6 +1,5 @@
 // Base types
 export type {
-  Emotion,
   EmotionIntensity,
   EmotionTransition,
   EmotionMetrics
@@ -56,7 +55,6 @@ export type {
   AudioConfig,
   RecordingSession,
   AudioService,
-  RecordingResult,
   VADConfig,
   ElevenLabsConfig,
   TTSParams,
@@ -64,11 +62,18 @@ export type {
   AudioServiceContext,
   AudioServiceSession,
   AudioServiceStateData,
-  AudioErrorDetails,
   CueSignal,
   CueDisplay,
   SceneProgression,
-  StateTransitions
+  StateTransitions,
+  AudioErrorDetails,
+  RecordingResult,
+  TTSRequest,
+  TTSMetrics,
+  VoiceModifier,
+  Voice,
+  TTSOptions,
+  TTSCacheEntry
 } from './audio';
 
 export {
@@ -79,26 +84,40 @@ export {
   ERROR_RECOVERY_HINTS
 } from './audio';
 
-// Metrics types
+// Export metrics types
 export type {
   ServiceMetrics,
-  PracticeMetrics
+  MetricsHistory,
+  PerformanceAlert,
+  PracticeMetrics,
+  PerformanceMetrics,
+  PipelineMetrics,
+  CacheMetrics,
+  StreamingMetrics
 } from './metrics';
 
-// Voice types
+// Export emotion types
 export type {
-  Voice,
-  VoiceSettings,
-  AudioSample,
-  TTSOptions,
-  VoiceModifier,
-  TTSCacheEntry
-} from './voice';
+  Emotion,
+  EmotionStyle
+} from './emotions';
 
-// Streaming types
-export type {
-  StreamingMetrics,
-  PipelineMetrics,
-  PerformanceMetrics,
-  CacheMetrics
-} from './streaming';
+// Core types
+export type { Service } from './core';
+
+// Re-export remaining types
+export * from './audio';
+export * from './practice';
+export * from './streaming';
+export * from './analysis';
+export * from './core';
+export * from './script';
+export * from './progress';
+export * from './voice';
+export * from './mobile';
+export * from './collaboration';
+export * from './errors';
+export * from './common';
+export * from './components';
+export * from './monitoring';
+export * from './actions';

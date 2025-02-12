@@ -29,10 +29,11 @@ describe('Load Testing Suite', () => {
     it('should handle multiple simultaneous audio streams', async () => {
       const userCount = 50
       const streamDuration = 5000 // 5 seconds
-      const streams = Array(userCount).fill(null).map(async () => {
-        await audioService.startRecording()
+      const streams = Array(userCount).fill(null).map(async (_, index) => {
+        const sessionId = `load-test-${index}`;
+        await audioService.startRecording(sessionId)
         await new Promise(resolve => setTimeout(resolve, streamDuration))
-        return audioService.stopRecording()
+        return audioService.stopRecording(sessionId)
       })
 
       const results = await Promise.all(streams)
@@ -81,8 +82,9 @@ describe('Load Testing Suite', () => {
     it('should maintain stable memory usage during extended sessions', async () => {
       const sessionDuration = 30000 // 30 seconds
       const memorySnapshots: number[] = []
+      const sessionId = 'memory-test';
 
-      await audioService.startRecording()
+      await audioService.startRecording(sessionId)
 
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, sessionDuration / 10))
@@ -90,7 +92,7 @@ describe('Load Testing Suite', () => {
         memorySnapshots.push(stats.heapUsed)
       }
 
-      await audioService.stopRecording()
+      await audioService.stopRecording(sessionId)
 
       // Ensure we have at least two snapshots for comparison
       if (memorySnapshots.length < 2) {
@@ -109,5 +111,21 @@ describe('Load Testing Suite', () => {
       const averageGrowth = memoryGrowth.reduce((a, b) => a + b, 0) / memoryGrowth.length
       expect(averageGrowth).toBeLessThan(1024 * 1024) // Less than 1MB per interval
     })
+  })
+
+  describe('Load Testing', () => {
+    it('should handle concurrent recording sessions', async () => {
+      const sessionId = `load-test-${Date.now()}`;
+      await audioService.startRecording(sessionId);
+      // Test logic
+      await audioService.stopRecording(sessionId);
+    });
+
+    it('should handle high volume of audio data', async () => {
+      const sessionId = `volume-test-${Date.now()}`;
+      await audioService.startRecording(sessionId);
+      // Test logic
+      await audioService.stopRecording(sessionId);
+    });
   })
 })

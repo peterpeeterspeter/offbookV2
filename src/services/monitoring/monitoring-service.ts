@@ -1,268 +1,244 @@
-import type { ErrorReport, HealthStatus, PerformanceMetrics } from '@/types/monitoring'
-import { monitoringConfig, ERROR_SEVERITY_THRESHOLDS, MONITORING_INTERVALS } from '@/config/monitoring'
+import type { ErrorReport, HealthStatus } from '@/types/monitoring'
+import type { PerformanceMetrics, PipelineMetrics, CacheMetrics, StreamingMetrics } from '@/types/metrics'
+import { ERROR_SEVERITY_THRESHOLDS, MONITORING_INTERVALS } from '@/config/monitoring'
 import { PerformanceAnalyzer } from '@/services/performance-analyzer'
-import { AudioService } from '@/services/audio-service'
+
+export type MonitoringServiceStatus = 'healthy' | 'degraded' | 'critical'
 
 export class MonitoringService {
   private static instance: MonitoringService
+  private healthStatus: MonitoringServiceStatus = 'healthy'
   private errorReports: ErrorReport[] = []
   private performanceMetrics: PerformanceMetrics[] = []
-  private healthStatus: HealthStatus = {
-    status: 'healthy',
-    lastCheck: Date.now(),
-    services: {}
-  }
-  private analyzer: PerformanceAnalyzer
+  private performanceAnalyzer: PerformanceAnalyzer = new PerformanceAnalyzer()
   private intervals: Record<string, NodeJS.Timeout> = {}
 
   private constructor() {
-    this.analyzer = new PerformanceAnalyzer()
     this.setupErrorTracking()
     this.setupPerformanceTracking()
-    this.setupHealthChecks()
+    this.performanceMetrics = []
   }
 
-  public static getInstance(): MonitoringService {
+  static getInstance(): MonitoringService {
     if (!MonitoringService.instance) {
       MonitoringService.instance = new MonitoringService()
     }
     return MonitoringService.instance
   }
 
-  private setupErrorTracking(): void {
-    if (!monitoringConfig.errorTracking.enabled) return
-
-    window.addEventListener('error', (event) => {
-      if (monitoringConfig.errorTracking.ignoredErrors?.includes(event.message)) {
-        return
-      }
-
+  private setupErrorTracking() {
+    window.onerror = (message, source, lineno, colno, error) => {
       this.trackError({
         type: 'runtime',
-        message: event.message,
-        stack: event.error?.stack,
-        timestamp: Date.now(),
-        severity: this.determineErrorSeverity(event)
+        message: message.toString(),
+        stack: error?.stack,
+        timestamp: Date.now()
       })
-    })
+    }
 
-    window.addEventListener('unhandledrejection', (event) => {
+    window.onunhandledrejection = (event) => {
       this.trackError({
         type: 'promise',
         message: event.reason?.message || 'Unhandled Promise Rejection',
         stack: event.reason?.stack,
-        timestamp: Date.now(),
-        severity: 'high'
+        timestamp: Date.now()
       })
-    })
+    }
   }
 
-  private setupPerformanceTracking(): void {
-    if (!monitoringConfig.performance.enabled) return
-
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (Math.random() < monitoringConfig.performance.sampleRate) {
-          this.trackPerformanceMetric({
-            type: entry.entryType,
-            name: entry.name,
-            duration: entry.duration,
-            timestamp: entry.startTime
-          })
-        }
-      }
-    })
-
-    observer.observe({
-      entryTypes: ['resource', 'navigation', 'mark', 'measure']
-    })
-
+  private setupPerformanceTracking() {
     this.intervals.metrics = setInterval(async () => {
-      const metrics = await this.analyzer.getPerformanceMetrics()
+      const metrics = await this.performanceAnalyzer.getPerformanceMetrics()
       this.checkPerformanceThresholds(metrics)
     }, MONITORING_INTERVALS.metrics)
   }
 
-  private setupHealthChecks(): void {
-    if (!monitoringConfig.health.enabled) return
-
-    this.intervals.health = setInterval(async () => {
-      const services = {
-        audio: await this.checkAudioService(),
-        storage: await this.checkStorageService(),
-        network: await this.checkNetworkConnectivity()
+  private async checkPerformanceThresholds(metrics: PerformanceMetrics) {
+    if (metrics.context?.memory) {
+      const { heapUsed, heapTotal } = metrics.context.memory
+      const memoryUsage = (heapUsed / heapTotal) * 100
+      if (memoryUsage > ERROR_SEVERITY_THRESHOLDS.memory.high) {
+        this.healthStatus = 'critical'
+      } else if (memoryUsage > ERROR_SEVERITY_THRESHOLDS.memory.medium) {
+        this.healthStatus = 'degraded'
       }
+    }
 
-      this.healthStatus = {
-        status: Object.values(services).every(s => s === 'healthy') ? 'healthy' : 'degraded',
-        lastCheck: Date.now(),
-        services,
-        details: await this.getHealthDetails()
+    if (metrics.context?.cpu) {
+      const { usage } = metrics.context.cpu
+      if (usage > ERROR_SEVERITY_THRESHOLDS.memory.high) {
+        this.healthStatus = 'critical'
+      } else if (usage > ERROR_SEVERITY_THRESHOLDS.memory.medium) {
+        this.healthStatus = 'degraded'
       }
+    }
 
-      if (this.healthStatus.status !== 'healthy') {
-        this.triggerHealthAlert()
+    if (metrics.streaming) {
+      const { streamLatency } = metrics.streaming
+      if (streamLatency > ERROR_SEVERITY_THRESHOLDS.memory.high) {
+        this.healthStatus = 'critical'
+      } else if (streamLatency > ERROR_SEVERITY_THRESHOLDS.memory.medium) {
+        this.healthStatus = 'degraded'
       }
-    }, monitoringConfig.health.checkInterval)
+    }
   }
 
   private async getHealthDetails() {
-    const [memory, battery] = await Promise.all([
-      this.analyzer.getMemoryStats(),
+    const [memoryStats, battery] = await Promise.all([
+      this.performanceAnalyzer.getMemoryStats(),
       navigator.getBattery()
     ])
 
     return {
       memory: {
-        used: memory.heapUsed,
-        total: memory.heapTotal,
-        threshold: monitoringConfig.performance.thresholds.memory
+        used: memoryStats.heapUsed,
+        total: memoryStats.heapTotal,
+        threshold: ERROR_SEVERITY_THRESHOLDS.memory.high
       },
-      battery: {
-        level: battery.level,
-        charging: battery.charging
+      audio: {
+        context: 'default',
+        sampleRate: 44100,
+        bufferSize: 4096
+      },
+      storage: {
+        used: 0,
+        available: 0,
+        quota: 0
       }
     }
   }
 
-  private determineErrorSeverity(error: ErrorEvent): ErrorReport['severity'] {
-    if (error.error?.name === 'SecurityError' || error.message.includes('QuotaExceededError')) {
-      return 'critical'
-    }
-    if (error.message.includes('NetworkError') || error.message.includes('timeout')) {
-      return 'high'
-    }
-    return 'medium'
-  }
-
-  private async checkPerformanceThresholds(metrics: PerformanceMetrics): Promise<void> {
-    const { memory, cpu, latency } = monitoringConfig.performance.thresholds
-
-    if (metrics.context?.memory?.heapUsed && metrics.context.memory.heapUsed > memory) {
-      this.triggerAlert('memory', metrics.context.memory.heapUsed)
+  private async updateMetrics(metrics: PerformanceMetrics) {
+    if (metrics.context?.memory) {
+      const memoryMetrics = await this.getMemoryMetrics()
+      metrics.context.memory = memoryMetrics
     }
 
-    if (metrics.context?.cpu?.usage && metrics.context.cpu.usage > cpu) {
-      this.triggerAlert('cpu', metrics.context.cpu.usage)
-    }
-
-    if (metrics.duration > latency) {
-      this.triggerAlert('latency', metrics.duration)
+    if (metrics.context) {
+      const resourceMetrics = await this.getResourceMetrics()
+      metrics.context.cpu = resourceMetrics.cpu
+      metrics.context.battery = resourceMetrics.battery
     }
   }
 
-  private triggerAlert(type: string, value: number): void {
-    const alert = {
-      type,
-      value,
+  private async collectMetrics(): Promise<PerformanceMetrics> {
+    const currentMetrics: PerformanceMetrics = {
+      type: 'system',
+      name: 'system-metrics',
+      duration: 0,
       timestamp: Date.now(),
-      threshold: monitoringConfig.performance.thresholds[type as keyof typeof monitoringConfig.performance.thresholds]
+      pipeline: {
+        totalRequests: 0,
+        errors: 0,
+        errorRate: 0,
+        averageLatency: 0,
+        throughput: 0,
+        queueUtilization: 0,
+        batchEfficiency: 0,
+        slowThreshold: 100,
+        slowOperations: 0
+      },
+      cache: {
+        hits: 0,
+        misses: 0,
+        ratio: 0,
+        totalRequests: 0,
+        averageLatency: 0,
+        frequentItemsRatio: 0,
+        uptime: 0
+      },
+      streaming: {
+        bitrate: 0,
+        packetLoss: 0,
+        jitter: 0,
+        roundTripTime: 0,
+        bufferUtilization: 0,
+        streamLatency: 0,
+        dropoutCount: 0,
+        recoveryTime: 0,
+        activeStreams: 0,
+        processingTime: 0,
+        networkLatency: 0,
+        adaptiveBufferSize: 0,
+        voiceChangeLatency: 0,
+        reconnectionCount: 0,
+        partialDataSize: 0
+      },
+      context: {
+        memory: {
+          heapUsed: 0,
+          heapTotal: 0,
+          heapLimit: 0
+        },
+        cpu: {
+          usage: 0,
+          cores: navigator.hardwareConcurrency || 1
+        },
+        battery: {
+          level: 1,
+          charging: true
+        }
+      }
     }
 
-    // Send alert to monitoring system
-    console.warn('Performance alert:', alert)
+    await this.updateMetrics(currentMetrics)
+    return currentMetrics
   }
 
-  private triggerHealthAlert(): void {
-    const alert = {
-      type: 'health',
-      status: this.healthStatus.status,
-      services: this.healthStatus.services,
-      timestamp: Date.now()
+  private async getMemoryMetrics(): Promise<{ heapUsed: number; heapTotal: number; heapLimit: number }> {
+    if ('memory' in performance) {
+      const memory = (performance as any).memory
+      return {
+        heapUsed: memory.usedJSHeapSize,
+        heapTotal: memory.totalJSHeapSize,
+        heapLimit: memory.jsHeapSizeLimit
+      }
     }
-
-    // Send health alert to monitoring system
-    console.warn('Health alert:', alert)
+    return {
+      heapUsed: 0,
+      heapTotal: 0,
+      heapLimit: 0
+    }
   }
 
-  public trackError(error: ErrorReport): void {
+  private async getResourceMetrics(): Promise<{ cpu: { usage: number; cores: number }; battery: { level: number; charging: boolean } }> {
+    const cpuUsage = await this.performanceAnalyzer.trackCPUUsage()
+    return {
+      cpu: {
+        usage: cpuUsage.percentage,
+        cores: navigator.hardwareConcurrency || 1
+      },
+      battery: {
+        level: 1,
+        charging: true
+      }
+    }
+  }
+
+  trackError(error: ErrorReport) {
     this.errorReports.push(error)
-
-    if (this.errorReports.length > monitoringConfig.errorTracking.maxErrors) {
-      this.errorReports.shift()
-    }
-
-    if (monitoringConfig.errorTracking.reportingEndpoint) {
-      // Send to error tracking service
-      fetch(monitoringConfig.errorTracking.reportingEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(error)
-      }).catch(console.error)
+    if (error.severity === 'critical') {
+      this.healthStatus = 'critical'
+    } else if (error.severity === 'high' && this.healthStatus !== 'critical') {
+      this.healthStatus = 'degraded'
     }
   }
 
-  public trackPerformanceMetric(metric: PerformanceMetrics): void {
-    this.performanceMetrics.push(metric)
-    this.checkPerformanceThresholds(metric)
-  }
-
-  public async getHealthStatus(): Promise<HealthStatus> {
+  getStatus(): MonitoringServiceStatus {
     return this.healthStatus
   }
 
-  private async checkAudioService(): Promise<'healthy' | 'degraded' | 'unhealthy'> {
-    try {
-      const state = AudioService.getState()
-      return state.error ? 'degraded' : 'healthy'
-    } catch {
-      return 'unhealthy'
-    }
+  getErrors(): ErrorReport[] {
+    return this.errorReports
   }
 
-  private async checkStorageService(): Promise<'healthy' | 'degraded' | 'unhealthy'> {
-    try {
-      const quota = await navigator.storage.estimate()
-      const usageRatio = quota.usage! / quota.quota!
-
-      if (usageRatio > ERROR_SEVERITY_THRESHOLDS.memory.high) {
-        return 'unhealthy'
-      }
-      if (usageRatio > ERROR_SEVERITY_THRESHOLDS.memory.medium) {
-        return 'degraded'
-      }
-      return 'healthy'
-    } catch {
-      return 'unhealthy'
-    }
-  }
-
-  private async checkNetworkConnectivity(): Promise<'healthy' | 'degraded' | 'unhealthy'> {
-    try {
-      const connection = (navigator as any).connection
-      if (!connection) return 'healthy'
-
-      if (connection.downlink < 1) {
-        return 'degraded'
-      }
-      if (connection.rtt > ERROR_SEVERITY_THRESHOLDS.latency.high) {
-        return 'unhealthy'
-      }
-      return 'healthy'
-    } catch {
-      return 'unhealthy'
-    }
-  }
-
-  public async generateReport(): Promise<{
-    errors: ErrorReport[];
-    performance: PerformanceMetrics[];
-    health: HealthStatus;
-  }> {
-    const currentMetrics = await this.analyzer.generatePerformanceReport()
-
-    return {
-      errors: this.errorReports.slice(-100), // Last 100 errors
-      performance: [...this.performanceMetrics.slice(-100), currentMetrics],
-      health: this.healthStatus
-    }
-  }
-
-  public cleanup(): void {
-    Object.values(this.intervals).forEach(clearInterval)
-    this.intervals = {}
+  clearErrors() {
     this.errorReports = []
-    this.performanceMetrics = []
+    this.healthStatus = 'healthy'
+  }
+
+  destroy() {
+    Object.values(this.intervals).forEach(clearInterval)
   }
 }
 
