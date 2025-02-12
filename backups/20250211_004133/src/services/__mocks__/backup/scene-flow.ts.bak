@@ -1,0 +1,102 @@
+import { AudioService } from "../audio-service";
+import { ScriptAnalysisService } from "../script-analysis";
+import { vi } from "vitest";
+
+export const SceneFlowService = {
+  current: null as any,
+  initialize: async (audioService: any, scriptAnalysisService: any) => {
+    SceneFlowService.current = {
+      initializeSession: async (scriptId: string, userRole: string) => {
+        await audioService.startRecording();
+        return {
+          scenes: [
+            {
+              id: "scene1",
+              number: 1,
+              title: "Opening Scene",
+              description: "The first scene of the script",
+              dialogue: [
+                {
+                  id: "line1",
+                  role: userRole,
+                  text: "First line",
+                  emotion: "neutral"
+                }
+              ]
+            },
+            {
+              id: "scene2",
+              number: 2,
+              title: "Second Scene",
+              description: "The second scene of the script",
+              dialogue: [
+                {
+                  id: "line2",
+                  role: userRole,
+                  text: "Second line",
+                  emotion: "happy"
+                }
+              ]
+            }
+          ],
+          stats: {
+            duration: 0,
+            accuracy: 0,
+            emotions: {},
+            sceneProgress: {
+              scene1: 0,
+              scene2: 0
+            },
+            timingScore: 0,
+            emotionMatchRate: 0
+          }
+        };
+      },
+      endSession: async () => {
+        await audioService.stopRecording();
+        return {
+          duration: 120,
+          accuracy: 0.85,
+          emotions: {
+            happy: 0.6,
+            neutral: 0.4
+          },
+          sceneProgress: {
+            scene1: 1,
+            scene2: 0.5
+          },
+          timingScore: 0.9,
+          emotionMatchRate: 0.8
+        };
+      },
+      getCurrentScene: () => ({
+        id: "scene1",
+        number: 1,
+        title: "Opening Scene",
+        description: "The first scene of the script",
+        dialogue: [
+          {
+            id: "line1",
+            role: "user",
+            text: "First line",
+            emotion: "neutral"
+          }
+        ]
+      }),
+      getStats: () => ({
+        duration: 60,
+        accuracy: 0.75,
+        emotions: {
+          happy: 0.3,
+          neutral: 0.7
+        },
+        sceneProgress: {
+          scene1: 0.5,
+          scene2: 0
+        },
+        timingScore: 0.8,
+        emotionMatchRate: 0.7
+      })
+    };
+  }
+};

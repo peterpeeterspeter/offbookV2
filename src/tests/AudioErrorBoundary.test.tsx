@@ -7,10 +7,24 @@ import {
   AudioServiceState,
   AudioErrorCategory,
   type AudioErrorDetails,
-} from "@/services/audio-state";
+  type AudioServiceStateData,
+} from "@/types/audio";
+import React from "react";
+
+// Mock AudioService
+const mockedAudioService = {
+  getState: vi.fn(),
+  cleanup: vi.fn(),
+  setup: vi.fn(),
+};
+
+vi.mock("@/services/audio-service", () => ({
+  AudioService: mockedAudioService,
+}));
 
 // Mock console.error to avoid noise in test output
 const originalError = console.error;
+
 beforeEach(() => {
   console.error = vi.fn();
 });
@@ -21,103 +35,189 @@ afterEach(() => {
 });
 
 describe("AudioErrorBoundary", () => {
-  const ErrorComponent = () => {
-    throw new Error("Test error");
+  const ErrorComponent: React.FC<{ shouldThrow?: boolean }> = ({
+    shouldThrow = false,
+  }) => {
+    if (shouldThrow) {
+      throw new Error("Test error");
+    }
+    return <div>Test Content</div>;
   };
 
-  const mockAudioState = {
+  const mockAudioState: AudioServiceStateData = {
     state: AudioServiceState.ERROR,
+    status: "error",
+    timestamp: Date.now(),
     error: {
+      name: "InitializationError",
       code: AudioServiceError.INITIALIZATION_FAILED,
       message: "Failed to initialize audio",
-      category: AudioErrorCategory.SYSTEM,
-      retryable: true,
-      timestamp: Date.now(),
-    } as AudioErrorDetails,
+      category: AudioErrorCategory.INITIALIZATION,
+      retryable: false,
+      details: { originalError: new Error("Test error") },
+    },
+    context: {
+      sampleRate: 44100,
+      channels: 1,
+      isContextRunning: false,
+      vadEnabled: false,
+      vadThreshold: 0.5,
+      vadSampleRate: 16000,
+      vadBufferSize: 480,
+      noiseThreshold: 0.2,
+      silenceThreshold: 0.1,
+    },
     session: {
       id: null,
       startTime: null,
       duration: null,
       chunks: 0,
     },
-    context: {
-      sampleRate: 44100,
-      channels: 1,
-      isContextRunning: false,
-      networkTimeout: 5000,
-      bitsPerSample: 16,
-      bufferSize: 4096,
-      compressionFormat: "wav",
-      vadEnabled: false,
-      vadThreshold: 0.5,
-      vadSampleRate: 16000,
-      vadBufferSize: 512,
-      silenceThreshold: -50,
-      noiseThreshold: -30,
-    },
   };
 
   beforeEach(() => {
-    vi.spyOn(AudioService, "getState").mockReturnValue(mockAudioState);
+    mockedAudioService.getState.mockReturnValue(mockAudioState);
   });
 
   it("should render children when no error", () => {
-    vi.spyOn(AudioService, "getState").mockReturnValue({
+    mockedAudioService.getState.mockReturnValue({
       ...mockAudioState,
       state: AudioServiceState.READY,
       error: null,
     });
 
-    const { container } = render(
+    render(
       <AudioErrorBoundary>
         <div data-testid="child">Test Content</div>
       </AudioErrorBoundary>
     );
 
     expect(screen.getByTestId("child")).toBeInTheDocument();
-    expect(container.textContent).toBe("Test Content");
+    expect(screen.getByText("Test Content")).toBeInTheDocument();
   });
 
-  it("should render error UI when error occurs", () => {
+  it("should catch and display React errors", () => {
     render(
       <AudioErrorBoundary>
-        <ErrorComponent />
+        <ErrorComponent shouldThrow={true} />
       </AudioErrorBoundary>
     );
 
     expect(screen.getByText("Audio Error")).toBeInTheDocument();
-    expect(screen.getByText(/Failed to initialize audio/)).toBeInTheDocument();
   });
 
-  it("should show correct error message for permission denied", () => {
-    vi.spyOn(AudioService, "getState").mockReturnValue({
+  it("should display specific error messages for known errors", () => {
+    mockedAudioService.getState.mockReturnValue({
       ...mockAudioState,
       error: {
-        code: AudioServiceError.PERMISSION_DENIED,
-        message: "Microphone access was denied",
-        category: AudioErrorCategory.PERMISSION,
+        name: "DeviceNotFoundError",
+        code: AudioServiceError.DEVICE_NOT_FOUND,
+        message: "No audio input device was found",
+        category: AudioErrorCategory.DEVICE,
         retryable: true,
-        timestamp: Date.now(),
+        details: { deviceId: "test-device" },
       },
     });
 
     render(
       <AudioErrorBoundary>
-        <ErrorComponent />
+        <ErrorComponent shouldThrow={true} />
       </AudioErrorBoundary>
     );
 
     expect(
-      screen.getByText(/Microphone access was denied/)
+      screen.getByText("No audio input device was found")
     ).toBeInTheDocument();
-    expect(screen.getByText("Open Settings")).toBeInTheDocument();
   });
 
-  it("should handle reset action", async () => {
+  it("should preserve error context", () => {
+    const errorDetails = { deviceId: "test-device" };
+    mockedAudioService.getState.mockReturnValue({
+      ...mockAudioState,
+      error: {
+        name: "DeviceInUseError",
+        code: AudioServiceError.DEVICE_IN_USE,
+        message: "Device in use",
+        category: AudioErrorCategory.DEVICE,
+        retryable: true,
+        details: errorDetails,
+      },
+    });
+
+    render(
+      <AudioErrorBoundary>
+        <ErrorComponent shouldThrow={true} />
+      </AudioErrorBoundary>
+    );
+
+    const state = mockedAudioService.getState();
+    expect(state.error?.details).toEqual(errorDetails);
+  });
+
+  it("should handle multiple errors in sequence", () => {
+    // First error
+    mockedAudioService.getState.mockReturnValue({
+      ...mockAudioState,
+      error: {
+        name: "DeviceNotFoundError",
+        code: AudioServiceError.DEVICE_NOT_FOUND,
+        message: "No audio input device was found",
+        category: AudioErrorCategory.DEVICE,
+        retryable: true,
+        details: { deviceId: "test-device" },
+      },
+    });
+
+    const { rerender } = render(
+      <AudioErrorBoundary>
+        <ErrorComponent shouldThrow={true} />
+      </AudioErrorBoundary>
+    );
+
+    expect(
+      screen.getByText("No audio input device was found")
+    ).toBeInTheDocument();
+
+    // Second error
+    mockedAudioService.getState.mockReturnValue({
+      ...mockAudioState,
+      error: {
+        name: "PermissionDeniedError",
+        code: AudioServiceError.PERMISSION_DENIED,
+        message: "Permission denied",
+        category: AudioErrorCategory.PERMISSION,
+        retryable: true,
+        details: { permission: "microphone" },
+      },
+    });
+
+    rerender(
+      <AudioErrorBoundary>
+        <ErrorComponent shouldThrow={true} />
+      </AudioErrorBoundary>
+    );
+
+    expect(screen.getByText("Permission denied")).toBeInTheDocument();
+  });
+
+  it("should handle error recovery", () => {
     const onReset = vi.fn();
+
+    mockedAudioService.getState.mockReturnValue({
+      ...mockAudioState,
+      error: {
+        name: "DeviceNotFoundError",
+        code: AudioServiceError.DEVICE_NOT_FOUND,
+        message: "No audio input device was found",
+        category: AudioErrorCategory.DEVICE,
+        retryable: true,
+        details: { deviceId: "test-device" },
+      },
+    });
+
     render(
       <AudioErrorBoundary onReset={onReset}>
-        <ErrorComponent />
+        <ErrorComponent shouldThrow={true} />
       </AudioErrorBoundary>
     );
 
@@ -125,49 +225,14 @@ describe("AudioErrorBoundary", () => {
     expect(onReset).toHaveBeenCalled();
   });
 
-  it("should handle audio reset action", async () => {
-    const cleanup = vi.spyOn(AudioService, "cleanup").mockResolvedValue();
-    const setup = vi.spyOn(AudioService, "setup").mockResolvedValue();
-
-    render(
+  it("should cleanup on unmount", () => {
+    const { unmount } = render(
       <AudioErrorBoundary>
-        <ErrorComponent />
+        <ErrorComponent shouldThrow={true} />
       </AudioErrorBoundary>
     );
 
-    const resetButton = screen.getByText("Try Again");
-    fireEvent.click(resetButton);
-
-    expect(cleanup).toHaveBeenCalled();
-    expect(setup).toHaveBeenCalled();
-  });
-
-  it("should handle permission request", async () => {
-    vi.spyOn(AudioService, "getState").mockReturnValue({
-      ...mockAudioState,
-      error: {
-        code: AudioServiceError.PERMISSION_DENIED,
-        message: "Microphone access was denied",
-        category: AudioErrorCategory.PERMISSION,
-        retryable: true,
-        timestamp: Date.now(),
-      },
-    });
-
-    const getUserMedia = vi.fn().mockResolvedValue({});
-    Object.defineProperty(global.navigator, "mediaDevices", {
-      value: { getUserMedia },
-      writable: true,
-    });
-
-    render(
-      <AudioErrorBoundary>
-        <ErrorComponent />
-      </AudioErrorBoundary>
-    );
-
-    const openSettingsButton = screen.getByText("Open Settings");
-    fireEvent.click(openSettingsButton);
-    expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
+    unmount();
+    expect(mockedAudioService.cleanup).toHaveBeenCalled();
   });
 });

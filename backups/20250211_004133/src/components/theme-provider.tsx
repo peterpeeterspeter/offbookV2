@@ -1,0 +1,16 @@
+import React from "react";
+import { ThemeProvider as NextThemesProvider } from "next-themes";
+import type { ThemeProviderProps } from "next-themes/dist/types";
+
+export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
+  // Default values for test environment
+  const defaultProps = {
+    attribute: "class",
+    defaultTheme: "system",
+    enableSystem: true,
+    disableTransitionOnChange: true,
+    ...props,
+  };
+
+  return <NextThemesProvider {...defaultProps}>{children}</NextThemesProvider>;
+}

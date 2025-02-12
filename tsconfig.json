@@ -31,6 +31,8 @@
     "**/backup/**",
     "**/backups/**",
     "src/backup/**",
-    "src/backups/**"
+    "src/backups/**",
+    "componentsV1/**",
+    "srcv1/**"
   ]
 }

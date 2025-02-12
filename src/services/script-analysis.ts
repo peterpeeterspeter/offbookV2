@@ -1,43 +1,33 @@
+// Type imports
 import type {
-  AudioService,
   AudioConfig,
   RecordingSession,
   RecordingResult,
-  TTSConfig
+  TTSConfig,
+  TTSParams
 } from '@/types/audio';
 import type {
-  DeepSeekR1Response,
-  DeepSeekR1Analysis,
+  AnalysisBatch,
+  AnalysisResult,
+  BatchResult,
+  ScriptAnalysisErrorDetails,
   EmotionSceneAnalysis,
-  EmotionSceneMetrics
+  EmotionSceneMetrics,
+  AnalysisParams,
+  DeepSeekR1Response,
+  DeepSeekR1Analysis
 } from '@/types/analysis';
-import type {
-  UploadProgress,
-  BatchProgress
-} from '@/types/progress';
-import type {
-  Role,
-  Scene,
-  Script,
-  LineHighlight,
-  LineProgress,
-  LineHighlightType
-} from '@/types/script';
-import type { Dict } from '@/types/common';
+import type { UploadProgress } from '@/types/progress';
+import type { Role, Scene, Script, LineHighlight, LineProgress } from '@/types/script';
 import type { PracticeMetrics } from '@/types/metrics';
+import type { AudioServiceType } from '@/components/SceneFlow';
 
-import {
-  ScriptAnalysisError,
-  ValidationError,
-  ProcessingError,
-  APIError,
-  ScriptAnalysisErrorCode
-} from '@/types/errors';
-
-import { BatchProcessor as BatchProcessorImpl } from './batch-processor';
-import { CACHE_CONFIG as CONFIG } from '@/config/cache';
-
-import { metrics, responseCache } from './metrics';
+// Value imports
+import { ScriptAnalysisEvent, ScriptAnalysisErrorCategory } from '@/types/analysis';
+import { SimpleCache, cache } from './cache';
+import { BatchProcessor } from './batch-processor-new';
+import { ScriptAnalysisError, ValidationError, ProcessingError, ScriptAnalysisErrorCode } from '@/types/errors';
+import { AudioService } from '@/services/audio-service';
 import { LRUCache } from 'lru-cache';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
@@ -86,7 +76,6 @@ const CACHE_CONFIG = {
   retryDelay: 1000,
 };
 
-// Batch processor
 interface BatchJob<T> {
   id: string;
   data: T;
@@ -95,68 +84,10 @@ interface BatchJob<T> {
   retryCount: number;
 }
 
-class BatchProcessor<T> {
-  private queue: BatchJob<T>[] = [];
-  private processing = false;
-  private timer: NodeJS.Timeout | null = null;
-
-  constructor(
-    private processFn: (items: T[]) => Promise<void>,
-    private options = {
-      batchSize: CACHE_CONFIG.batchSize,
-      maxRetries: CACHE_CONFIG.retryAttempts,
-      retryDelay: CACHE_CONFIG.retryDelay,
-    }
-  ) {}
-
-  async add(data: T, priority = 0): Promise<void> {
-    const job: BatchJob<T> = {
-      id: Math.random().toString(36).substring(7),
-      data,
-      priority,
-      timestamp: Date.now(),
-      retryCount: 0,
-    };
-
-    this.queue.push(job);
-    this.queue.sort((a, b) => b.priority - a.priority);
-
-    if (!this.processing) {
-      this.startProcessing();
-    }
-  }
-
-  private async startProcessing(): Promise<void> {
-    if (this.processing) return;
-
-    this.processing = true;
-    while (this.queue.length > 0) {
-      const batch = this.queue.splice(0, this.options.batchSize);
-      try {
-        await this.processFn(batch.map(job => job.data));
-      } catch (error) {
-        // Handle failed jobs
-        for (const job of batch) {
-          if (job.retryCount < this.options.maxRetries) {
-            job.retryCount++;
-            this.queue.push(job);
-            await new Promise(resolve =>
-              setTimeout(resolve, this.options.retryDelay * job.retryCount)
-            );
-          }
-        }
-      }
-    }
-    this.processing = false;
-  }
-
-  clear(): void {
-    this.queue = [];
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-  }
+interface BatchProcessorOptions {
+  batchSize: number;
+  maxRetries: number;
+  retryDelay: number;
 }
 
 export interface ScriptMetadata {
@@ -181,96 +112,221 @@ export interface PracticeSession {
   metrics: PracticeMetrics;
 }
 
+interface PipelineMetrics {
+  averageLatency: number;
+  throughput: number;
+  errorRate: number;
+  queueUtilization: number;
+  batchEfficiency: number;
+}
+
+type AnalysisOperation = {
+  type: 'emotion' | 'scene' | 'character';
+  text: string;
+};
+
+type RecordingOperation = {
+  type: 'START_RECORDING' | 'STOP_RECORDING' | 'INITIALIZE_TTS';
+  sessionId: string;
+};
+
+type OperationType = AnalysisOperation | RecordingOperation;
+
+// Constants for error handling
+const ERROR_TYPES = {
+  ANALYSIS: 'ANALYSIS' as const,
+  ERROR: 'ERROR' as const
+} as const;
+
 export class ScriptAnalysisService {
   private readonly ALLOWED_FILE_TYPES = [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain',
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   ];
   private readonly MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
-  private readonly lineHighlights = new Map<string, Required<LineHighlight>[]>();
-  private readonly lineProgress = new Map<string, Map<string, Required<LineProgress>>>();
-  private readonly cache = new Map<string, DeepSeekR1Analysis>();
-  private currentSession: RecordingSession | null = null;
-  private isRecording = false;
-  private batchProcessor: BatchProcessorImpl<{
-    text: string;
-    type: 'scene' | 'character' | 'emotion';
-  }>;
-
   private readonly retryConfig = {
     maxRetries: 3,
     baseDelay: 1000,
-    maxDelay: 5000
+    maxDelay: 10000
   };
-
   private readonly cacheConfig = {
-    maxSize: 100,
-    ttl: 1000 * 60 * 60, // 1 hour
-    updateAgeOnGet: true
+    ttl: 3600000 // 1 hour
   };
+  private readonly lineHighlights = new Map<string, Required<LineHighlight>[]>();
+  private readonly lineProgress = new Map<string, Map<string, Required<LineProgress>>>();
+  private readonly cache: SimpleCache;
+  private currentSession: RecordingSession | null = null;
+  private isRecording = false;
+  private currentSessionId: string | null = null;
+  private onProgress?: (progress: UploadProgress) => void;
+  private audioService: AudioServiceType;
+  private batchProcessor: BatchProcessor;
 
-  constructor(
-    private readonly audioService: AudioService,
-    private readonly onProgress?: (progress: UploadProgress) => void
-  ) {
-    this.batchProcessor = new BatchProcessorImpl(
-      async (items) => {
-        await Promise.all(
-          items.map(async (item) => {
-            try {
-              switch (item.type) {
-                case 'scene':
-                  return await this.extractRolesAndScenes(item.text);
-                case 'character':
-                  return await this.extractCues(item.text);
-                case 'emotion':
-                  return await this.analyzeEmotions(item.text);
-                default:
-                  throw new ProcessingError('Unknown analysis type', {
-                    type: item.type
-                  });
-              }
-            } catch (error) {
-              console.error(`Analysis error for type ${item.type}:`, error);
-              throw error;
-            }
-          })
-        );
-      },
-      {
-        batchSize: CONFIG.batchSize,
-        maxRetries: CONFIG.retryAttempts,
-        retryDelay: CONFIG.retryDelay,
-      }
-    );
+  constructor(audioService: AudioServiceType, onProgress?: (progress: UploadProgress) => void) {
+    this.audioService = audioService;
+    this.onProgress = onProgress;
+    this.cache = cache; // Use the singleton instance
+    this.batchProcessor = new BatchProcessor({
+      batchSize: 10,
+      maxRetries: 3,
+      retryDelay: 1000,
+      slowThreshold: 5000,
+      slowOperations: ['emotion', 'scene']
+    });
   }
 
   private updateProgress(progress: UploadProgress): void {
     this.onProgress?.(progress);
   }
 
-  async initializeTTS(config: TTSConfig): Promise<void> {
+  async setup(): Promise<void> {
     try {
-      if (!config.voiceId) {
-        throw new ProcessingError('Voice ID is required', {
-          code: ScriptAnalysisErrorCode.MISSING_REQUIRED_FIELD,
-          field: 'voiceId'
-        });
-      }
-
-      await this.audioService.initializeTTS({
-        voiceId: config.voiceId,
-        settings: config.settings ?? {
-          stability: 0.5,
-          similarity_boost: 0.5
-        }
+      await this.audioService.setup();
+    } catch (error) {
+      throw new ProcessingError('Failed to setup audio service', {
+        originalError: error instanceof Error ? error : new Error(String(error))
       });
+    }
+  }
+
+  async startRecording(sessionId: string): Promise<void> {
+    try {
+      this.currentSessionId = sessionId;
+      await this.audioService.startRecording(sessionId);
+    } catch (error) {
+      throw new ProcessingError('Failed to start recording', {
+        originalError: error instanceof Error ? error : new Error(String(error))
+      });
+    }
+  }
+
+  async stopRecording(): Promise<void> {
+    if (this.currentSessionId) {
+      await this.audioService.stopRecording(this.currentSessionId);
+    }
+  }
+
+  async initializeTTS(sessionId: string, userRole: string): Promise<void> {
+    try {
+      await this.audioService.initializeTTS(sessionId, userRole);
     } catch (error) {
       throw new ProcessingError('Failed to initialize TTS', {
         originalError: error instanceof Error ? error : new Error(String(error))
       });
     }
+  }
+
+  async processAudioChunk(sessionId: string, chunk: Float32Array): Promise<boolean> {
+    try {
+      return await this.audioService.processAudioChunk(sessionId, chunk);
+    } catch (error) {
+      throw new ProcessingError('Failed to process audio chunk', {
+        originalError: error instanceof Error ? error : new Error(String(error))
+      });
+    }
+  }
+
+  async generateSpeech(params: TTSParams): Promise<Float32Array> {
+    try {
+      return await this.audioService.generateSpeech(params);
+    } catch (error) {
+      throw new ProcessingError('Failed to generate speech', {
+        originalError: error instanceof Error ? error : new Error(String(error))
+      });
+    }
+  }
+
+  private async processBatch(batch: AnalysisBatch): Promise<BatchResult> {
+    const results = await Promise.all(
+      batch.items.map(async (item) => {
+        try {
+          const analysisResult = await this.analyzeText(item.params.text, 'emotion');
+          if (!analysisResult) {
+            throw new Error('Analysis failed to produce a result');
+          }
+          return {
+            id: item.id,
+            result: analysisResult
+          };
+        } catch (error) {
+          console.error('Failed to process item:', error);
+          return {
+            id: item.id,
+            result: this.createError(error instanceof Error ? error : new Error(String(error)))
+          };
+        }
+      })
+    );
+
+    return {
+      batchId: batch.id,
+      results,
+      completedAt: Date.now(),
+      duration: Date.now() - batch.createdAt
+    };
+  }
+
+  private async processOperation(operation: OperationType): Promise<void> {
+    if (this.isAnalysisOperation(operation)) {
+      await this.analyzeText(operation.text, operation.type);
+    } else {
+      await this.handleRecordingOperation(operation);
+    }
+  }
+
+  private isAnalysisOperation(operation: OperationType): operation is AnalysisOperation {
+    return ['emotion', 'scene', 'character'].includes(operation.type);
+  }
+
+  private async handleRecordingOperation(operation: RecordingOperation): Promise<void> {
+    switch (operation.type) {
+      case 'START_RECORDING':
+        await this.startRecording(operation.sessionId);
+        break;
+      case 'STOP_RECORDING':
+        await this.stopRecording();
+        break;
+      case 'INITIALIZE_TTS':
+        await this.initializeTTS(operation.sessionId, 'user');
+        break;
+    }
+  }
+
+  private async analyzeText(text: string, type: 'emotion' | 'scene' | 'character'): Promise<AnalysisResult> {
+    // Implementation of text analysis
+    const result: AnalysisResult = {
+      id: crypto.randomUUID(),
+      text,
+      recording: {
+        id: crypto.randomUUID(),
+        startTime: Date.now(),
+        audioData: new Float32Array(0),
+        duration: 0
+      },
+      emotions: [],
+      timing: {
+        expectedDuration: 0,
+        actualDuration: 0,
+        accuracy: 0,
+        segments: []
+      },
+      accuracy: {
+        emotion: 0,
+        intensity: 0,
+        timing: 0,
+        overall: 0
+      }
+    };
+
+    const cacheKey = this.getCacheKey(text, type);
+    const cachedResult = this.cache.get(cacheKey);
+    if (cachedResult) {
+      return cachedResult as AnalysisResult;
+    }
+
+    this.cache.set(cacheKey, result);
+    return result;
   }
 
   private async initializeLineByLine(sessionId: string, lineIds: string[]): Promise<void> {
@@ -300,20 +356,19 @@ export class ScriptAnalysisService {
 
   private async initializeAudioService(): Promise<void> {
     try {
-      const defaultConfig: TTSConfig = {
-        voiceId: 'default',
+      const defaultParams: TTSParams = {
+        text: '',
+        voice: 'default',
         settings: {
-          stability: 0.5,
-          similarity_boost: 0.5,
-          style: 0,
-          use_speaker_boost: false
+          speed: 1.0,
+          pitch: 1.0,
+          volume: 1.0
         }
       };
-      await this.audioService.initializeTTS(defaultConfig);
+      await this.audioService.generateSpeech(defaultParams);
     } catch (error) {
       throw new ProcessingError('Failed to initialize audio service', {
-        originalError: error instanceof Error ? error : new Error(String(error)),
-        code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED
+        originalError: error instanceof Error ? error : new Error(String(error))
       });
     }
   }
@@ -356,8 +411,7 @@ export class ScriptAnalysisService {
             code: ScriptAnalysisErrorCode.ANALYSIS_FAILED
           });
         }
-      },
-      { ttl: this.cacheConfig.ttl }
+      }
     );
   }
 
@@ -379,15 +433,14 @@ export class ScriptAnalysisService {
   }
 
   protected parseEmotionAnalysis(response: DeepSeekR1Response): EmotionSceneAnalysis {
-    const analysis = this.convertToAnalysis(response);
-
+    const analysis = response.choices[0].message.content;
     return {
-      primaryEmotion: analysis.primary_emotion,
-      intensity: analysis.intensity,
-      confidence: analysis.confidence,
-      secondaryEmotions: analysis.secondary_emotions,
-      description: analysis.explanation,
-      metrics: this.calculateSceneMetrics(analysis)
+      emotion: analysis.primary_emotion || '',
+      intensity: analysis.intensity || 0,
+      confidence: analysis.confidence || 0,
+      start: 0,
+      end: 0,
+      text: ''
     };
   }
 
@@ -622,23 +675,20 @@ Format as JSON array:
         this.withCache(
           this.getCacheKey(text, 'cues'),
           () => this.extractCues(text)
-        ),
+        )
       ]);
-
-      // Queue emotion analysis for batch processing
-      await this.batchProcessor.add(
-        { text, type: 'emotion' },
-        1 // High priority
-      );
 
       this.updateProgress({ status: 'complete', progress: 100 });
 
-      return {
-        ...metadata,
+      const scriptMetadata: ScriptMetadata = {
+        title: metadata.title,
+        description: metadata.description,
         roles: rolesAndScenes.roles,
         scenes: rolesAndScenes.scenes,
-        cues,
+        cues
       };
+
+      return scriptMetadata;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
@@ -652,30 +702,20 @@ Format as JSON array:
         throw error;
       }
       throw new ProcessingError('Failed to process script', {
-        originalError: error,
+        originalError: error instanceof Error ? error : new Error(String(error))
       });
     }
   }
 
   private getCacheKey(text: string, type: string): string {
-    return `${type}_${this.hashText(text)}`;
+    const hash = Array.from(text)
+      .reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0)
+      .toString(36);
+    return `analysis:${type}:${hash}`;
   }
 
-  private hashText(text: string): string {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return hash.toString(36);
-  }
-
-  private async withRetry<T>(
-    operation: () => Promise<T>,
-    context: string
-  ): Promise<T> {
-    let lastError: Error | null = null;
+  private async withRetry<T>(operation: () => Promise<T>, context: string): Promise<T> {
+    let lastError: Error | undefined = undefined;
 
     for (let attempt = 1; attempt <= this.retryConfig.maxRetries; attempt++) {
       try {
@@ -686,8 +726,7 @@ Format as JSON array:
         if (attempt === this.retryConfig.maxRetries) {
           throw new ProcessingError(`Failed ${context} after ${attempt} attempts`, {
             originalError: lastError,
-            code: ScriptAnalysisErrorCode.RETRY_EXHAUSTED,
-            context
+            code: ScriptAnalysisErrorCode.RETRY_EXHAUSTED
           });
         }
 
@@ -695,65 +734,33 @@ Format as JSON array:
           this.retryConfig.baseDelay * Math.pow(2, attempt - 1),
           this.retryConfig.maxDelay
         );
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise<void>(resolve => setTimeout(resolve, delay));
       }
     }
 
-    // TypeScript requires this but it's unreachable
     throw lastError;
   }
 
-  private async withCache<T>(
-    key: string,
-    operation: () => Promise<T>,
-    options?: {
-      bypassCache?: boolean;
-      ttl?: number;
+  private async withCache<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const cached = this.cache.get(key);
+    if (cached) {
+      return cached as T;
     }
-  ): Promise<T> {
-    const { bypassCache = false, ttl = this.cacheConfig.ttl } = options ?? {};
-
-    // Check cache unless explicitly bypassed
-    if (!bypassCache) {
-      const cached = CACHE_CONFIG.analysisCache.get<T>(key);
-      if (cached) {
-        metrics.cache.hits++;
-        return cached;
-      }
-    }
-
-    metrics.cache.misses++;
-    const startTime = Date.now();
-
-    try {
-      // Execute operation with retry logic
-      const result = await this.withRetry(operation, `cache operation for ${key}`);
-      const duration = Date.now() - startTime;
-
-      // Update performance metrics
-      this.updateMetrics(duration);
-
-      // Cache the result with TTL
-      CACHE_CONFIG.analysisCache.set(key, result, { ttl });
-
-      return result;
-    } catch (error) {
-      metrics.pipeline.errors++;
-      throw error;
-    }
+    const result = await fn();
+    this.cache.set(key, result);
+    return result;
   }
 
-  private updateMetrics(duration: number): void {
-    const { pipeline } = metrics;
-    pipeline.avgResponseTime =
-      (pipeline.avgResponseTime * pipeline.totalRequests + duration) /
-      (pipeline.totalRequests + 1);
-    pipeline.totalRequests++;
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => {
+      const timeoutId = setTimeout(resolve, ms);
+      // Ensure the timeout is cleared if the promise is cancelled
+      return () => clearTimeout(timeoutId);
+    });
+  }
 
-    // Track performance thresholds
-    if (duration > pipeline.slowThreshold) {
-      pipeline.slowOperations++;
-    }
+  private updatePracticeMetrics(metrics: PracticeMetrics): void {
+    this.cache.set('metrics', metrics);
   }
 
   async uploadAndAnalyze(
@@ -863,12 +870,11 @@ Format as JSON array:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        voiceId,
+        voice: voiceId,
         settings: voiceSettings ?? {
-          stability: 0.5,
-          similarity_boost: 0.5,
-          style: 0,
-          use_speaker_boost: false
+          speed: 1.0,
+          pitch: 1.0,
+          volume: 1.0
         }
       }),
     });
@@ -881,33 +887,39 @@ Format as JSON array:
     }
   }
 
+  private initializePracticeMetrics(): PracticeMetrics {
+    return {
+      emotionMatch: 0,
+      intensityMatch: 0,
+      timingAccuracy: 0,
+      overallScore: 0,
+      timing: {
+        averageDelay: 0,
+        maxDelay: 0,
+        minDelay: 0,
+        responseDelays: []
+      },
+      accuracy: {
+        correctLines: 0,
+        totalLines: 0,
+        accuracy: 0
+      },
+      emotions: {
+        matchedEmotions: 0,
+        totalEmotionalCues: 0,
+        emotionAccuracy: 0
+      }
+    };
+  }
+
   async startCuePractice(scriptId: string): Promise<PracticeSession> {
     const session: PracticeSession = {
       id: crypto.randomUUID(),
       scriptId,
       mode: 'cue',
       startTime: new Date(),
-      metrics: {
-        timing: {
-          averageDelay: 0,
-          maxDelay: 0,
-          minDelay: Infinity,
-          responseDelays: []
-        },
-        accuracy: {
-          correctLines: 0,
-          totalLines: 0,
-          accuracy: 0
-        },
-        emotions: {
-          matchedEmotions: 0,
-          totalEmotionalCues: 0,
-          emotionAccuracy: 0
-        }
-      }
+      metrics: this.initializePracticeMetrics()
     };
-
-    // Initialize Whisper and VAD for recording
     await this.initializeRecording();
     return session;
   }
@@ -917,12 +929,17 @@ Format as JSON array:
     sceneId: string,
     userRole: string
   ): Promise<PracticeSession> {
+    await this.audioService.initializeTTS(sceneId, userRole);
     const session: PracticeSession = {
       id: crypto.randomUUID(),
       scriptId,
       mode: 'scene-flow',
       startTime: new Date(),
       metrics: {
+        emotionMatch: 0,
+        intensityMatch: 0,
+        timingAccuracy: 0,
+        overallScore: 0,
         timing: {
           averageDelay: 0,
           maxDelay: 0,
@@ -941,59 +958,27 @@ Format as JSON array:
         }
       }
     };
-
-    // Initialize TTS with standardized config
-    const ttsConfig: TTSConfig = {
-      voiceId: sceneId,
-      settings: {
-        stability: 0.5,
-        similarity_boost: 0.5,
-        style: 0,
-        use_speaker_boost: false
-      }
-    };
-    await this.initializeTTS(ttsConfig);
-
     return session;
   }
 
-  async startLineByLine(
-    scriptId: string,
-    lineIds: string[]
-  ): Promise<PracticeSession> {
+  async startLineByLine(scriptId: string, lineIds: string[]): Promise<PracticeSession> {
     const session: PracticeSession = {
       id: crypto.randomUUID(),
       scriptId,
       mode: 'line-by-line',
       startTime: new Date(),
-      metrics: {
-        timing: {
-          averageDelay: 0,
-          maxDelay: 0,
-          minDelay: Infinity,
-          responseDelays: []
-        },
-        accuracy: {
-          correctLines: 0,
-          totalLines: 0,
-          accuracy: 0
-        },
-        emotions: {
-          matchedEmotions: 0,
-          totalEmotionalCues: 0,
-          emotionAccuracy: 0
-        }
-      }
+      metrics: this.initializePracticeMetrics()
     };
-
-    // Initialize TTS and line tracking
     await this.initializeLineByLine(session.id, lineIds);
     return session;
   }
 
   private async initializeRecording(): Promise<void> {
     try {
-      await this.audioService.startRecording();
+      if (!this.currentSessionId) {
+        throw new Error('No active session ID');
+      }
+      await this.audioService.startRecording(this.currentSessionId);
     } catch (error) {
       throw new ProcessingError('Failed to initialize recording', {
         originalError: error instanceof Error ? error : new Error(String(error))
@@ -1014,128 +999,50 @@ Format as JSON array:
 
   async cleanup(): Promise<void> {
     try {
-      await Promise.all([
-        this.batchProcessor.clear(),
-        this.audioService.cleanup()
-      ]);
-
-      // Clear caches
-      CACHE_CONFIG.analysisCache.clear();
-      this.cache.clear();
-
-      // Reset metrics
-      Object.assign(metrics.pipeline, {
-        totalRequests: 0,
-        errors: 0,
-        avgResponseTime: 0,
-        slowOperations: 0
-      });
-    } catch (error) {
-      throw new ProcessingError('Failed to cleanup resources', {
-        originalError: error instanceof Error ? error : new Error(String(error)),
-        code: ScriptAnalysisErrorCode.CLEANUP_FAILED
-      });
-    }
-  }
-
-  private async processOperation(operation: Dict<string, any>): Promise<void> {
-    if (!operation.type) {
-      throw new ValidationError('Operation type not specified', {
-        code: ScriptAnalysisErrorCode.MISSING_REQUIRED_FIELD,
-        field: 'type'
-      });
-    }
-
-    const operationType = operation.type as string;
-    switch (operationType) {
-      case 'START_RECORDING':
-        await this.initializeRecording();
-        break;
-      case 'STOP_RECORDING':
+      if (this.currentSessionId) {
         await this.stopRecording();
-        break;
-      case 'INITIALIZE_TTS':
-        if (!operation.voiceId) {
-          throw new ValidationError('Voice ID not specified', {
-            code: ScriptAnalysisErrorCode.MISSING_REQUIRED_FIELD,
-            field: 'voiceId'
-          });
-        }
-        await this.initializeTTS({
-          voiceId: operation.voiceId,
-          settings: operation.settings
-        });
-        break;
-      default:
-        throw new ValidationError(`Unknown operation type: ${operationType}`);
-    }
-  }
-
-  async stopRecording(): Promise<RecordingSession> {
-    try {
-      const result = await this.audioService.stopRecording();
-      if (!this.currentSession) {
-        throw new ProcessingError('No active recording session');
       }
 
-      const updatedSession: RecordingSession = {
-        ...this.currentSession,
-        duration: result.duration,
-        accuracy: result.accuracy,
-        timing: result.timing,
-        transcription: result.transcription,
-        isActive: false
-      };
-
-      this.currentSession = updatedSession;
-      return updatedSession;
+      this.currentSession = null;
+      this.isRecording = false;
+      this.currentSessionId = null;
     } catch (error) {
-      throw new ProcessingError('Failed to stop recording', {
-        originalError: error instanceof Error ? error : new Error(String(error))
-      });
+      console.error('Cleanup error:', error);
+      throw error;
     }
   }
 
-  private getHighlights(currentLineId: string): Required<LineHighlight>[] {
-    const highlights: Required<LineHighlight>[] = [];
-    const defaultHighlight: Required<LineHighlight> = {
-      lineId: currentLineId,
-      type: 'current',
-      note: '',
-      emotion: '',
-      intensity: 0
+  async queueAnalysis(text: string, type: 'emotion' | 'scene' | 'character'): Promise<void> {
+    const params: AnalysisParams = {
+      text,
+      audioData: new Float32Array(0),
+      settings: {
+        emotionThreshold: 0.5,
+        intensityThreshold: 0.5,
+        timingThreshold: 0.5
+      }
     };
 
-    highlights.push(defaultHighlight);
-    return highlights;
+    const batch: Omit<AnalysisBatch, 'id' | 'createdAt'> = {
+      items: [{
+        id: crypto.randomUUID(),
+        params
+      }],
+      priority: 1
+    };
+
+    this.batchProcessor.add(batch);
+    await this.batchProcessor.startProcessing();
   }
 
-  static async analyzeScript(text: string): Promise<EmotionSceneAnalysis> {
-    const mockAudioService: AudioService = {
-      startRecording: async () => {},
-      stopRecording: async () => ({
-        duration: 0,
-        accuracy: 0,
-        timing: {
-          start: 0,
-          end: 0,
-          segments: []
-        },
-        transcription: ''
-      }),
-      getCurrentSession: async () => null,
-      initializeTTS: async (config: TTSConfig) => {
-        if (!config.voiceId) {
-          throw new ProcessingError('Voice ID is required', {
-            code: ScriptAnalysisErrorCode.MISSING_REQUIRED_FIELD
-          });
-        }
-      },
-      cleanup: async () => {}
+  private createError(error: Error): ScriptAnalysisErrorDetails {
+    return {
+      code: ScriptAnalysisEvent.ERROR,
+      category: ScriptAnalysisErrorCategory.ANALYSIS,
+      message: error.message,
+      name: error.name,
+      retryable: true
     };
-
-    const service = new ScriptAnalysisService(mockAudioService);
-    return service.analyzeEmotion(text);
   }
 }
 

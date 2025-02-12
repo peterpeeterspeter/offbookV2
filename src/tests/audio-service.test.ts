@@ -1,124 +1,141 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { AudioService } from '../services/audio-service';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { AudioService } from '@/services/audio-service';
+import {
+  AudioServiceState,
+  AudioServiceError,
+  type RecordingResult,
+  type TTSParams
+} from '@/types/audio';
 
-// Mock MediaRecorder type
-type MockMediaRecorderType = {
-  new (stream: MediaStream): Partial<MediaRecorder>;
-  isTypeSupported(type: string): boolean;
-};
+// Mock navigator.mediaDevices
+const mockEnumerateDevices = vi.fn();
+const mockGetUserMedia = vi.fn();
+Object.defineProperty(navigator, 'mediaDevices', {
+  value: {
+    enumerateDevices: mockEnumerateDevices,
+    getUserMedia: mockGetUserMedia,
+    dispatchEvent: vi.fn(),
+  },
+  writable: true,
+});
+
+// Mock MediaRecorder
+class MockMediaRecorder {
+  state: string = 'inactive';
+  ondataavailable: ((event: any) => void) | null = null;
+  onstop: (() => void) | null = null;
+
+  start() {
+    this.state = 'recording';
+    if (this.ondataavailable) {
+      this.ondataavailable({ data: new Blob() });
+    }
+  }
+
+  stop() {
+    this.state = 'inactive';
+    if (this.onstop) {
+      this.onstop();
+    }
+  }
+}
+
+// @ts-expect-error - Mock MediaRecorder
+global.MediaRecorder = MockMediaRecorder;
 
 describe('AudioService', () => {
+  const sessionId = 'test-session';
+  const userRole = 'test-role';
+
   beforeEach(async () => {
-    // Mock MediaDevices
-    Object.defineProperty(global.navigator, 'mediaDevices', {
-      value: {
-        getUserMedia: vi.fn().mockResolvedValue({
-          getTracks: () => [{
-            stop: vi.fn()
-          }]
-        })
-      },
-      writable: true
+    mockGetUserMedia.mockResolvedValue({
+      getTracks: () => [{
+        stop: vi.fn()
+      }]
     });
-
-    // Mock MediaRecorder
-    const MockMediaRecorder = vi.fn().mockImplementation(() => ({
-      start: vi.fn(),
-      stop: vi.fn(),
-      state: 'inactive',
-      ondataavailable: null,
-      onstop: null
-    })) as unknown as MockMediaRecorderType;
-
-    MockMediaRecorder.isTypeSupported = vi.fn().mockReturnValue(true);
-    global.MediaRecorder = MockMediaRecorder as unknown as typeof MediaRecorder;
-
-    // Mock AudioContext
-    global.AudioContext = vi.fn().mockImplementation(() => ({
-      state: 'running',
-      close: vi.fn().mockResolvedValue(undefined),
-      resume: vi.fn().mockResolvedValue(undefined)
-    })) as unknown as typeof AudioContext;
   });
 
   afterEach(async () => {
-    // Cleanup after each test
     await AudioService.cleanup();
     vi.clearAllMocks();
   });
 
-  describe('initialization', () => {
-    it('should initialize successfully', async () => {
-      await AudioService.setup();
-      expect(AudioService.isReady()).toBe(true);
-    });
-
-    it('should handle initialization errors', async () => {
-      const error = new Error('Failed to create AudioContext');
-      global.AudioContext = vi.fn().mockImplementation(() => {
-        throw error;
-      });
-
-      await expect(AudioService.setup()).rejects.toThrow('Failed to initialize audio context');
-      expect(AudioService.isReady()).toBe(false);
-    });
+  it('should initialize correctly', async () => {
+    await AudioService.setup();
+    const state = AudioService.getState();
+    expect(state.state).toBe(AudioServiceState.READY);
   });
 
-  describe('recording', () => {
-    beforeEach(async () => {
-      await AudioService.setup();
-    });
-
-    it('should start recording successfully', async () => {
-      await AudioService.startRecording();
-      expect(global.navigator.mediaDevices.getUserMedia).toHaveBeenCalled();
-      expect(global.MediaRecorder).toHaveBeenCalled();
-    });
-
-    it('should handle recording errors', async () => {
-      global.navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error('Permission denied'));
-      await expect(AudioService.startRecording()).rejects.toThrow('Failed to start recording');
-    });
-
-    it('should stop recording and cleanup resources', async () => {
-      await AudioService.startRecording();
-      const result = await AudioService.stopRecording();
-
-      expect(result).toEqual(expect.objectContaining({
-        duration: expect.any(Number),
-        accuracy: expect.any(Number)
-      }));
-    });
-
-    it('should handle multiple recording sessions', async () => {
-      // First session
-      await AudioService.startRecording();
-      await AudioService.stopRecording();
-
-      // Second session
-      await AudioService.startRecording();
-      await AudioService.stopRecording();
-
-      expect(global.navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2);
-    });
+  it('should start recording with session ID', async () => {
+    await AudioService.setup();
+    await AudioService.startRecording(sessionId);
+    const state = AudioService.getState();
+    expect(state.state).toBe(AudioServiceState.RECORDING);
   });
 
-  describe('cleanup', () => {
-    it('should cleanup all resources', async () => {
-      await AudioService.setup();
-      await AudioService.startRecording();
-      await AudioService.cleanup();
+  it('should stop recording and return result', async () => {
+    await AudioService.setup();
+    await AudioService.startRecording(sessionId);
+    const result = await AudioService.stopRecording(sessionId);
+    expect(result).toHaveProperty('id', sessionId);
+    expect(result).toHaveProperty('audioData');
+    expect(result).toHaveProperty('duration');
+  });
 
-      expect(AudioService.isReady()).toBe(false);
-    });
+  it('should initialize TTS with session ID and user role', async () => {
+    await AudioService.setup();
+    await expect(AudioService.initializeTTS(sessionId, userRole)).resolves.not.toThrow();
+  });
 
-    it('should handle cleanup during active recording', async () => {
-      await AudioService.setup();
-      await AudioService.startRecording();
-      await AudioService.cleanup();
+  it('should process audio chunks', async () => {
+    await AudioService.setup();
+    await AudioService.startRecording(sessionId);
+    const chunk = new Float32Array(1024);
+    const result = await AudioService.processAudioChunk(sessionId, chunk);
+    expect(typeof result).toBe('boolean');
+  });
 
-      expect(AudioService.isReady()).toBe(false);
-      await expect(AudioService.stopRecording()).rejects.toThrow('Recording not started');
-    });
+  it('should generate speech from text', async () => {
+    await AudioService.setup();
+    const params: TTSParams = {
+      text: 'Hello world',
+      voice: 'default',
+      settings: {
+        speed: 1,
+        pitch: 1,
+        volume: 1
+      }
+    };
+    const result = await AudioService.generateSpeech(params);
+    expect(result).toBeInstanceOf(Float32Array);
+  });
+
+  it('should handle cleanup correctly', async () => {
+    await AudioService.setup();
+    await AudioService.cleanup();
+    const state = AudioService.getState();
+    expect(state.state).toBe(AudioServiceState.UNINITIALIZED);
+  });
+
+  it('should handle errors during initialization', async () => {
+    mockGetUserMedia.mockRejectedValue(new Error('Permission denied'));
+    await expect(AudioService.setup()).rejects.toThrow();
+    const state = AudioService.getState();
+    expect(state.state).toBe(AudioServiceState.ERROR);
+    expect(state.error?.code).toBe(AudioServiceError.INITIALIZATION_FAILED);
+  });
+
+  it('should handle errors during recording', async () => {
+    await AudioService.setup();
+    // @ts-expect-error - Mock MediaRecorder error
+    global.MediaRecorder = class {
+      constructor() {
+        throw new Error('Recording failed');
+      }
+    };
+    await expect(AudioService.startRecording(sessionId)).rejects.toThrow();
+    const state = AudioService.getState();
+    expect(state.state).toBe(AudioServiceState.ERROR);
+    expect(state.error?.code).toBe(AudioServiceError.RECORDING_FAILED);
   });
 });

@@ -1,12 +1,9 @@
 import React from "react";
-import {
-  render as rtlRender,
-  RenderOptions,
-  RenderResult,
-} from "@testing-library/react";
+import { render, RenderOptions } from "@testing-library/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/toaster";
 import { vi } from "vitest";
+import type { EmotionMetrics } from "@/types/emotions";
 
 // Mock next-themes
 const mockThemeContext = {
@@ -33,27 +30,22 @@ vi.mock("@/components/ui/toaster", () => ({
 }));
 
 const AllProviders = ({ children }: { children: React.ReactNode }) => (
-  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-    {children}
-    <Toaster />
-  </ThemeProvider>
+  <div data-testid="all-providers">{children}</div>
 );
 
-const render = (
+const customRender = (
   ui: React.ReactElement,
   options: Omit<RenderOptions, "wrapper"> = {}
 ) => {
-  const Wrapper = ({ children }: { children: React.ReactNode }) => (
-    <AllProviders>{children}</AllProviders>
-  );
-  return rtlRender(ui, { wrapper: Wrapper, ...options });
+  // @ts-expect-error - Known type issue with @testing-library/react render function types
+  return render(ui, { wrapper: AllProviders, ...options });
 };
 
 // Re-export everything
 export * from "@testing-library/react";
 
 // Override render method
-export { render };
+export { customRender as render };
 
 // Type assertion helper
 export function assertIsReactComponent<T>(
@@ -62,4 +54,19 @@ export function assertIsReactComponent<T>(
   if (!component) {
     throw new Error("Component is undefined");
   }
+}
+
+/**
+ * Creates mock emotion metrics for testing
+ */
+export function createMockEmotionMetrics(
+  overrides?: Partial<EmotionMetrics>
+): EmotionMetrics {
+  return {
+    emotionMatch: 0.8,
+    intensityMatch: 0.7,
+    timingAccuracy: 0.9,
+    overallScore: 0.8,
+    ...overrides,
+  };
 }

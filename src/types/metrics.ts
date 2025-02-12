@@ -12,6 +12,17 @@ export interface ServiceMetrics {
     }
     customMetrics?: Record<string, number>
   }
+  pipeline: PipelineMetrics
+  cache: {
+    hits: number
+    misses: number
+    ratio: number
+    totalRequests: number
+    averageLatency: number
+    frequentItemsRatio: number
+    uptime: number
+  }
+  streaming?: StreamingMetrics
 }
 
 export interface MetricsHistory {
@@ -40,18 +51,22 @@ export interface PerformanceAlert {
 }
 
 export interface PracticeMetrics {
-  timing: {
+  emotionMatch: number;
+  intensityMatch: number;
+  timingAccuracy: number;
+  overallScore: number;
+  timing?: {
     averageDelay: number;
     maxDelay: number;
     minDelay: number;
     responseDelays: number[];
   };
-  accuracy: {
+  accuracy?: {
     correctLines: number;
     totalLines: number;
     accuracy: number;
   };
-  emotions: {
+  emotions?: {
     matchedEmotions: number;
     totalEmotionalCues: number;
     emotionAccuracy: number;
@@ -90,4 +105,40 @@ export interface PerformanceMetrics {
     reconnectionCount: number;
     partialDataSize: number;
   };
+}
+
+export interface PipelineMetrics {
+  averageLatency: number;
+  throughput: number;
+  errorRate: number;
+  queueUtilization: number;
+  batchEfficiency: number;
+  totalRequests: number;
+  errors: number;
+  slowThreshold?: number;
+  slowOperations?: number;
+}
+
+export interface CacheMetrics {
+  hits: number;
+  misses: number;
+  ratio: number;
+  totalRequests: number;
+  averageLatency: number;
+  frequentItemsRatio: number;
+  uptime: number;
+}
+
+export interface StreamingMetrics {
+  bufferUtilization: number;
+  streamLatency: number;
+  dropoutCount: number;
+  recoveryTime: number;
+  activeStreams: number;
+  processingTime: number;
+  networkLatency: number;
+  adaptiveBufferSize: number;
+  voiceChangeLatency: number;
+  reconnectionCount: number;
+  partialDataSize: number;
 }

@@ -9,9 +9,8 @@ import {
   AudioServiceError,
   AudioServiceState,
   AudioErrorCategory,
-  AudioStateManager,
   AudioServiceEvent,
-} from "@/services/audio-state";
+} from "@/types/audio";
 
 // Mock AudioService
 vi.mock("@/services/audio-service", () => ({
@@ -19,10 +18,10 @@ vi.mock("@/services/audio-service", () => ({
     getState: vi.fn().mockReturnValue({
       state: AudioServiceState.ERROR,
       error: {
-        category: AudioErrorCategory.SYSTEM,
+        category: AudioErrorCategory.INITIALIZATION,
         code: AudioServiceError.INITIALIZATION_FAILED,
         message: "An error occurred",
-        retryable: true,
+        details: { retryable: true },
       },
     }),
     cleanup: vi.fn().mockResolvedValue(undefined),
@@ -50,47 +49,44 @@ describe("AudioErrorBoundary", () => {
     if (shouldThrow) {
       throw new Error("Test error");
     }
-    return <div>Normal content</div>;
+    return <div>Test Component</div>;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("should render children when no error", () => {
+  it("renders children when there is no error", () => {
     render(
       <AudioErrorBoundary>
-        <ErrorComponent />
+        <div data-testid="test-child">Test Child</div>
       </AudioErrorBoundary>
     );
-    expect(screen.getByText("Normal content")).toBeInTheDocument();
+
+    expect(screen.getByTestId("test-child")).toBeInTheDocument();
   });
 
-  it("should render error UI when error occurs", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => {});
+  it("renders error UI when an error occurs", () => {
+    render(
+      <AudioErrorBoundary>
+        <ErrorComponent shouldThrow={true} />
+      </AudioErrorBoundary>
+    );
 
-    (AudioService.getState as any).mockReturnValue({
-      state: AudioServiceState.ERROR,
-      error: {
-        category: AudioErrorCategory.SYSTEM,
-        code: AudioServiceError.INITIALIZATION_FAILED,
-        message: "An error occurred",
-        retryable: true,
-      },
-    });
+    expect(screen.getByText("Audio Error")).toBeInTheDocument();
+    expect(screen.getByText("Test error")).toBeInTheDocument();
+  });
 
-    await act(async () => {
-      render(
-        <AudioErrorBoundary>
-          <ErrorComponent shouldThrow={true} />
-        </AudioErrorBoundary>
-      );
-    });
+  it("calls onReset when try again is clicked", async () => {
+    const onReset = vi.fn();
+    render(
+      <AudioErrorBoundary onReset={onReset}>
+        <ErrorComponent shouldThrow={true} />
+      </AudioErrorBoundary>
+    );
 
-    expect(screen.getByText(/error occurred/i)).toBeInTheDocument();
-    consoleError.mockRestore();
+    fireEvent.click(screen.getByText("Try Again"));
+    expect(onReset).toHaveBeenCalled();
   });
 
   it("should show correct error message for permission denied", async () => {

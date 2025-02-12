@@ -10,23 +10,29 @@ export interface StreamingMetrics {
   voiceChangeLatency: number;
   reconnectionCount: number;
   partialDataSize: number;
+  bitrate: number;
+  packetLoss: number;
+  jitter: number;
+  roundTripTime: number;
 }
 
 export interface PipelineMetrics {
   totalRequests: number;
   errors: number;
-  errorRate: number;
-  averageLatency: number;
-  throughput: number;
-  queueUtilization: number;
-  batchEfficiency: number;
   slowThreshold: number;
   slowOperations: number;
+  averageLatency: number;
+  throughput: number;
+  errorRate: number;
+  queueUtilization: number;
+  batchEfficiency: number;
 }
 
 export interface CacheMetrics {
   hits: number;
   misses: number;
+  size: number;
+  evictions: number;
   ratio: number;
   totalRequests: number;
   averageLatency: number;
@@ -41,7 +47,25 @@ export interface PerformanceMetrics {
   timestamp: number;
   pipeline: PipelineMetrics;
   cache: CacheMetrics;
-  streaming?: StreamingMetrics;
+  memory: {
+    heapUsed: number;
+    heapTotal: number;
+    heapLimit: number;
+  };
+  battery: {
+    level: number;
+    charging: boolean;
+  };
+  streaming: StreamingMetrics;
+  resources: {
+    cpu: {
+      percentage: number;
+    };
+    network: {
+      bandwidth: number;
+      latency: number;
+    };
+  };
 }
 
 // Extend the Navigator interface to include getBattery

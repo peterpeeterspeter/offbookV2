@@ -50,91 +50,346 @@ export class MockMediaStream {
   }
 }
 
-// Mock BlobEvent
-export class MockBlobEvent extends Event {
-  readonly data: Blob
+// Mock Blob
+export class MockBlob implements Blob {
+  private data: Uint8Array;
+  readonly size: number;
+  readonly type: string;
 
-  constructor(type: string, eventInitDict: { data: Blob }) {
-    super(type)
-    this.data = eventInitDict.data
+  constructor(chunks: BlobPart[] = [], options?: BlobPropertyBag) {
+    // Convert chunks to Uint8Array
+    let totalLength = 0;
+    const chunksAsUint8 = chunks.map(chunk => {
+      if (chunk instanceof Uint8Array) return chunk;
+      if (chunk instanceof ArrayBuffer) return new Uint8Array(chunk);
+      if (chunk instanceof DataView) return new Uint8Array(chunk.buffer);
+      if (chunk instanceof Int8Array || chunk instanceof Int16Array ||
+          chunk instanceof Int32Array || chunk instanceof Uint8ClampedArray ||
+          chunk instanceof Uint16Array || chunk instanceof Uint32Array ||
+          chunk instanceof Float32Array || chunk instanceof Float64Array) {
+        return new Uint8Array(chunk.buffer);
+      }
+      if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+      if (chunk instanceof Blob) {
+        // For Blob chunks, we need to convert them to ArrayBuffer first
+        // This is done synchronously in the mock implementation for simplicity
+        const arrayBuffer = chunk.arrayBuffer();
+        if (arrayBuffer instanceof Promise) {
+          throw new Error('Blob chunks must be handled asynchronously');
+        }
+        return new Uint8Array(arrayBuffer);
+      }
+      throw new Error('Unsupported chunk type: ' + (chunk ? chunk.constructor.name : typeof chunk));
+    });
+
+    totalLength = chunksAsUint8.reduce((acc, chunk) => acc + chunk.length, 0);
+    this.data = new Uint8Array(totalLength);
+
+    let offset = 0;
+    for (const chunk of chunksAsUint8) {
+      this.data.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    this.size = totalLength;
+    this.type = options?.type || '';
+  }
+
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    // Create a new ArrayBuffer to avoid SharedArrayBuffer issues
+    const buffer = new ArrayBuffer(this.data.length);
+    new Uint8Array(buffer).set(this.data);
+    return buffer;
+  }
+
+  async bytes(): Promise<Uint8Array> {
+    return this.data;
+  }
+
+  slice(start?: number, end?: number, contentType?: string): Blob {
+    const slicedData = this.data.slice(start, end);
+    return new MockBlob([slicedData], { type: contentType || this.type });
+  }
+
+  stream(): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(this.data);
+        controller.close();
+      }
+    });
+  }
+
+  async text(): Promise<string> {
+    return new TextDecoder().decode(this.data);
+  }
+}
+
+// Create a helper function to create a MockBlob from chunks asynchronously
+export async function createMockBlobAsync(chunks: BlobPart[], options?: BlobPropertyBag): Promise<MockBlob> {
+  const processedChunks: Uint8Array[] = [];
+
+  for (const chunk of chunks) {
+    if (chunk instanceof Blob) {
+      const arrayBuffer = await chunk.arrayBuffer();
+      processedChunks.push(new Uint8Array(arrayBuffer));
+    } else {
+      let processedChunk: Uint8Array;
+
+      if (chunk instanceof Uint8Array) {
+        processedChunk = chunk;
+      } else if (chunk instanceof ArrayBuffer) {
+        processedChunk = new Uint8Array(chunk);
+      } else if (chunk instanceof DataView) {
+        processedChunk = new Uint8Array(chunk.buffer);
+      } else if (chunk instanceof Int8Array || chunk instanceof Int16Array ||
+                 chunk instanceof Int32Array || chunk instanceof Uint8ClampedArray ||
+                 chunk instanceof Uint16Array || chunk instanceof Uint32Array ||
+                 chunk instanceof Float32Array || chunk instanceof Float64Array) {
+        processedChunk = new Uint8Array(chunk.buffer);
+      } else if (typeof chunk === 'string') {
+        processedChunk = new TextEncoder().encode(chunk);
+      } else {
+        throw new Error('Unsupported chunk type: ' + (chunk ? chunk.constructor.name : typeof chunk));
+      }
+
+      processedChunks.push(processedChunk);
+    }
+  }
+
+  return new MockBlob(processedChunks, options);
+}
+
+// Mock BlobEvent
+export class MockBlobEvent extends Event implements BlobEvent {
+  readonly data: Blob;
+  readonly timecode: number;
+
+  constructor(type: string, eventInitDict: { data: Blob; timecode?: number }) {
+    super(type);
+    this.data = eventInitDict.data;
+    this.timecode = eventInitDict.timecode ?? 0; // Default to 0 if not provided
   }
 }
 
 // Mock MediaRecorder
-export class MockMediaRecorder {
-  static isTypeSupported(type: string): boolean {
-    return true
-  }
+export class MockMediaRecorder extends EventTarget implements MediaRecorder {
+  private audioChunks: Float32Array[] = [];
+  private recordingInterval: NodeJS.Timeout | null = null;
+  private isReady: boolean = false;
+  private initPromise: Promise<void>;
+  readonly stream: MediaStream;
+  state: RecordingState = 'inactive';
+  mimeType: string = 'audio/wav';
+  videoBitsPerSecond: number = 0;
+  audioBitsPerSecond: number = 128000;
 
-  state: 'inactive' | 'recording' | 'paused' = 'inactive'
-  stream: MediaStream
-  mimeType = 'audio/webm'
-  audioBitsPerSecond = 128000
-  videoBitsPerSecond = 2500000
-  private timesliceMs?: number
-  private dataAvailableTimer?: number
-
-  ondataavailable: ((event: MockBlobEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
-  onpause: (() => void) | null = null
-  onresume: (() => void) | null = null
-  onstart: (() => void) | null = null
-  onstop: (() => void) | null = null
+  ondataavailable: ((event: BlobEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onpause: ((event: Event) => void) | null = null;
+  onresume: ((event: Event) => void) | null = null;
+  onstart: ((event: Event) => void) | null = null;
+  onstop: ((event: Event) => void) | null = null;
 
   constructor(stream: MediaStream, options?: MediaRecorderOptions) {
-    this.stream = stream
-    if (options?.mimeType) this.mimeType = options.mimeType
-    if (options?.audioBitsPerSecond) this.audioBitsPerSecond = options.audioBitsPerSecond
-    if (options?.videoBitsPerSecond) this.videoBitsPerSecond = options.videoBitsPerSecond
+    super();
+    this.stream = stream;
+    if (options?.mimeType) {
+      this.mimeType = options.mimeType;
+    }
+    if (options?.audioBitsPerSecond) {
+      this.audioBitsPerSecond = options.audioBitsPerSecond;
+    }
+    this.initPromise = this.initialize();
   }
 
-  start(timeslice?: number) {
-    this.state = 'recording'
-    this.timesliceMs = timeslice
-    if (this.onstart) this.onstart()
+  private async initialize(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    this.isReady = true;
+  }
 
-    if (this.timesliceMs) {
-      this.dataAvailableTimer = window.setInterval(() => {
-        this.dispatchDataAvailable()
-      }, this.timesliceMs)
+  async waitForReady(): Promise<void> {
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('MediaRecorder not ready')), 500);
+    });
+
+    try {
+      await Promise.race([this.initPromise, timeoutPromise]);
+    } catch (error) {
+      this.isReady = false;
+      throw error;
     }
   }
 
-  stop() {
-    if (this.dataAvailableTimer) {
-      window.clearInterval(this.dataAvailableTimer)
-    }
-    this.state = 'inactive'
-    this.dispatchDataAvailable()
-    if (this.onstop) this.onstop()
-  }
-
-  pause() {
-    if (this.state === 'recording') {
-      this.state = 'paused'
-      if (this.onpause) this.onpause()
-    }
-  }
-
-  resume() {
-    if (this.state === 'paused') {
-      this.state = 'recording'
-      if (this.onresume) this.onresume()
-    }
-  }
-
-  requestData() {
+  async start(timeslice?: number): Promise<void> {
+    await this.waitForReady();
     if (this.state !== 'inactive') {
-      this.dispatchDataAvailable()
+      this.state = 'inactive';
+      this.stop();
     }
+
+    this.state = 'recording';
+    this.audioChunks = [];
+
+    const event = new Event('start');
+    this.dispatchEvent(event);
+    if (this.onstart) this.onstart(event);
+
+    const chunkInterval = timeslice || 1000;
+    this.recordingInterval = setInterval(() => {
+      if (this.state !== 'recording') return;
+
+      const chunk = this.generateAudioChunk(chunkInterval);
+      this.audioChunks.push(chunk);
+
+      const audioBuffer = this.convertToAudioBuffer(chunk);
+      const event = new MockBlobEvent('dataavailable', {
+        data: new MockBlob([audioBuffer], { type: this.mimeType }),
+        timecode: Date.now()
+      });
+      this.dispatchEvent(event);
+      if (this.ondataavailable) this.ondataavailable(event);
+    }, chunkInterval);
   }
 
-  private dispatchDataAvailable() {
-    if (this.ondataavailable) {
-      const blob = new Blob([], { type: this.mimeType })
-      const event = new MockBlobEvent('dataavailable', { data: blob })
-      this.ondataavailable(event)
+  private generateAudioChunk(duration: number): Float32Array {
+    const sampleRate = 44100;
+    const numSamples = Math.floor(sampleRate * (duration / 1000));
+    const frequency = 440;
+    const audioData = new Float32Array(numSamples);
+
+    for (let i = 0; i < numSamples; i++) {
+      audioData[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate);
     }
+
+    return audioData;
+  }
+
+  private convertToAudioBuffer(float32Data: Float32Array): ArrayBuffer {
+    // Convert Float32Array to Int16Array
+    const int16Data = new Int16Array(float32Data.length);
+    for (let i = 0; i < float32Data.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32Data[i]));
+      int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+
+    // Create WAV header
+    const numChannels = 1;
+    const sampleRate = 44100;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+    const blockAlign = numChannels * (bitsPerSample / 8);
+    const subchunk2Size = int16Data.length * 2;
+    const chunkSize = 36 + subchunk2Size;
+
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+
+    // "RIFF" chunk descriptor
+    view.setUint8(0, 0x52); // 'R'
+    view.setUint8(1, 0x49); // 'I'
+    view.setUint8(2, 0x46); // 'F'
+    view.setUint8(3, 0x46); // 'F'
+    view.setUint32(4, chunkSize, true);
+    view.setUint8(8, 0x57); // 'W'
+    view.setUint8(9, 0x41); // 'A'
+    view.setUint8(10, 0x56); // 'V'
+    view.setUint8(11, 0x45); // 'E'
+
+    // "fmt " sub-chunk
+    view.setUint8(12, 0x66); // 'f'
+    view.setUint8(13, 0x6D); // 'm'
+    view.setUint8(14, 0x74); // 't'
+    view.setUint8(15, 0x20); // ' '
+    view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+    view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+
+    // "data" sub-chunk
+    view.setUint8(36, 0x64); // 'd'
+    view.setUint8(37, 0x61); // 'a'
+    view.setUint8(38, 0x74); // 't'
+    view.setUint8(39, 0x61); // 'a'
+    view.setUint32(40, subchunk2Size, true);
+
+    // Combine header and data
+    const combinedBuffer = new ArrayBuffer(header.byteLength + int16Data.buffer.byteLength);
+    const combinedArray = new Uint8Array(combinedBuffer);
+    combinedArray.set(new Uint8Array(header), 0);
+    combinedArray.set(new Uint8Array(int16Data.buffer), header.byteLength);
+
+    return combinedBuffer;
+  }
+
+  stop(): void {
+    if (this.state === 'inactive') return;
+
+    if (this.recordingInterval) {
+      clearInterval(this.recordingInterval);
+      this.recordingInterval = null;
+    }
+
+    // Combine all chunks into one Float32Array
+    const totalLength = this.audioChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const combinedData = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of this.audioChunks) {
+      combinedData.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Convert to WAV format
+    const audioBuffer = this.convertToAudioBuffer(combinedData);
+    const finalBlob = new MockBlob([audioBuffer], { type: this.mimeType });
+
+    const dataEvent = new MockBlobEvent('dataavailable', {
+      data: finalBlob,
+      timecode: Date.now()
+    });
+    this.dispatchEvent(dataEvent);
+    if (this.ondataavailable) this.ondataavailable(dataEvent);
+
+    this.state = 'inactive';
+    const stopEvent = new Event('stop');
+    this.dispatchEvent(stopEvent);
+    if (this.onstop) this.onstop(stopEvent);
+  }
+
+  pause(): void {
+    if (this.state !== 'recording') return;
+    this.state = 'paused';
+    const event = new Event('pause');
+    this.dispatchEvent(event);
+    if (this.onpause) this.onpause(event);
+  }
+
+  resume(): void {
+    if (this.state !== 'paused') return;
+    this.state = 'recording';
+    const event = new Event('resume');
+    this.dispatchEvent(event);
+    if (this.onresume) this.onresume(event);
+  }
+
+  requestData(): void {
+    if (this.state === 'inactive') return;
+
+    const chunk = this.generateAudioChunk(100); // Generate a small chunk
+    const audioBuffer = this.convertToAudioBuffer(chunk);
+    const event = new MockBlobEvent('dataavailable', {
+      data: new MockBlob([audioBuffer], { type: this.mimeType }),
+      timecode: Date.now()
+    });
+    this.dispatchEvent(event);
+    if (this.ondataavailable) this.ondataavailable(event);
+  }
+
+  static isTypeSupported(type: string): boolean {
+    return type === 'audio/wav';
   }
 }
 
@@ -194,515 +449,45 @@ class AudioParamMock implements AudioParam {
   }
 }
 
-export class MockAudioContext implements AudioContext {
-  readonly destination: AudioDestinationNode;
-  readonly sampleRate: number = 44100;
-  readonly baseLatency: number = 0.005;
-  readonly outputLatency: number = 0.01;
-  readonly state: AudioContextState = 'running';
-  readonly audioWorklet: AudioWorklet;
-  readonly currentTime: number = 0;
-  readonly listener: AudioListener;
-  onstatechange: ((this: BaseAudioContext, ev: Event) => any) | null = null;
+// Mock AudioContext
+export class MockAudioContext {
+  sampleRate: number = 44100;
 
-  private eventListeners: Map<string, Set<EventListenerOrEventListenerObject>> = new Map();
+  async decodeAudioData(arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
+    // Convert the WAV data to Float32Array
+    const dataView = new DataView(arrayBuffer);
+    const numChannels = 1;
+    const sampleRate = 44100;
+    const bitsPerSample = 16;
+    const headerLength = 44; // WAV header length
+    const dataLength = (arrayBuffer.byteLength - headerLength) / (bitsPerSample / 8);
+    const audioData = new Float32Array(dataLength);
 
-  constructor() {
-    this.destination = {
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      maxChannelCount: 2,
-      numberOfInputs: 1,
-      numberOfOutputs: 0,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as AudioDestinationNode;
-
-    this.audioWorklet = {
-      addModule: vi.fn().mockResolvedValue(undefined),
-    } as unknown as AudioWorklet;
-
-    this.listener = {
-      positionX: new AudioParamMock(0),
-      positionY: new AudioParamMock(0),
-      positionZ: new AudioParamMock(0),
-      forwardX: new AudioParamMock(0),
-      forwardY: new AudioParamMock(0),
-      forwardZ: new AudioParamMock(-1),
-      upX: new AudioParamMock(0),
-      upY: new AudioParamMock(1),
-      upZ: new AudioParamMock(0),
-      setPosition: vi.fn(),
-      setOrientation: vi.fn(),
-    } as unknown as AudioListener;
-
-    // Bind methods to instance
-    this.createDynamicsCompressor = this.createDynamicsCompressor.bind(this);
-    this.createGain = this.createGain.bind(this);
-    this.createOscillator = this.createOscillator.bind(this);
-    this.createAnalyser = this.createAnalyser.bind(this);
-    this.createScriptProcessor = this.createScriptProcessor.bind(this);
-    this.createBuffer = this.createBuffer.bind(this);
-    this.createBufferSource = this.createBufferSource.bind(this);
-    this.createMediaElementSource = this.createMediaElementSource.bind(this);
-    this.createMediaStreamSource = this.createMediaStreamSource.bind(this);
-    this.createMediaStreamDestination = this.createMediaStreamDestination.bind(this);
-    this.getOutputTimestamp = this.getOutputTimestamp.bind(this);
-    this.suspend = this.suspend.bind(this);
-    this.resume = this.resume.bind(this);
-    this.close = this.close.bind(this);
-  }
-
-  addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {
-    if (!this.eventListeners.has(type)) {
-      this.eventListeners.set(type, new Set());
+    // Skip WAV header and read PCM data
+    for (let i = 0; i < dataLength; i++) {
+      const index = headerLength + (i * (bitsPerSample / 8));
+      const sample = dataView.getInt16(index, true);
+      audioData[i] = sample / 0x8000; // Convert to float in range [-1, 1]
     }
-    this.eventListeners.get(type)?.add(listener);
-  }
 
-  removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void {
-    this.eventListeners.get(type)?.delete(listener);
-  }
-
-  dispatchEvent(event: Event): boolean {
-    const listeners = this.eventListeners.get(event.type);
-    if (!listeners) return true;
-
-    listeners.forEach(listener => {
-      if (typeof listener === 'function') {
-        listener.call(this, event);
-      } else {
-        listener.handleEvent(event);
-      }
-    });
-
-    return true;
-  }
-
-  createDynamicsCompressor(): DynamicsCompressorNode {
-    const compressor = {
-      threshold: new AudioParamMock(-24),
-      knee: new AudioParamMock(30),
-      ratio: new AudioParamMock(12),
-      attack: new AudioParamMock(0.003),
-      release: new AudioParamMock(0.25),
-      reduction: -20,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    };
-
-    compressor.connect = compressor.connect.bind(compressor);
-    compressor.disconnect = compressor.disconnect.bind(compressor);
-
-    return compressor as unknown as DynamicsCompressorNode;
-  }
-
-  createGain(): GainNode {
     return {
-      gain: new AudioParamMock(1),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as GainNode;
-  }
-
-  createOscillator(): OscillatorNode {
-    return {
-      frequency: new AudioParamMock(440),
-      detune: new AudioParamMock(0),
-      type: 'sine',
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as OscillatorNode;
-  }
-
-  createAnalyser(): AnalyserNode {
-    return {
-      fftSize: 2048,
-      frequencyBinCount: 1024,
-      minDecibels: -100,
-      maxDecibels: -30,
-      smoothingTimeConstant: 0.8,
-      getFloatFrequencyData: vi.fn(),
-      getByteFrequencyData: vi.fn(),
-      getFloatTimeDomainData: vi.fn(),
-      getByteTimeDomainData: vi.fn(),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as AnalyserNode;
-  }
-
-  createScriptProcessor(
-    bufferSize = 4096,
-    numberOfInputChannels = 2,
-    numberOfOutputChannels = 2
-  ): ScriptProcessorNode {
-    return {
-      bufferSize,
-      numberOfInputs: numberOfInputChannels,
-      numberOfOutputs: numberOfOutputChannels,
-      onaudioprocess: null,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as ScriptProcessorNode;
-  }
-
-  createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer {
-    return {
-      length,
-      numberOfChannels,
       sampleRate,
-      duration: length / sampleRate,
-      getChannelData: vi.fn().mockReturnValue(new Float32Array(length)),
-      copyFromChannel: vi.fn(),
-      copyToChannel: vi.fn(),
-    } as unknown as AudioBuffer;
+      length: audioData.length,
+      duration: audioData.length / sampleRate,
+      numberOfChannels: numChannels,
+      getChannelData: (channel: number) => {
+        if (channel === 0) return audioData;
+        throw new Error('Invalid channel index');
+      }
+    } as AudioBuffer;
   }
+}
 
-  createBufferSource(): AudioBufferSourceNode {
-    return {
-      buffer: null,
-      playbackRate: new AudioParamMock(1),
-      detune: new AudioParamMock(0),
-      loop: false,
-      loopStart: 0,
-      loopEnd: 0,
-      start: vi.fn(),
-      stop: vi.fn(),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as AudioBufferSourceNode;
-  }
+// Patch global AudioContext
+(globalThis as any).AudioContext = MockAudioContext;
+(globalThis as any).webkitAudioContext = MockAudioContext;
 
-  createMediaElementSource(mediaElement: HTMLMediaElement): MediaElementAudioSourceNode {
-    return {
-      mediaElement,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as MediaElementAudioSourceNode;
-  }
-
-  createMediaStreamSource(mediaStream: MediaStream): MediaStreamAudioSourceNode {
-    return {
-      mediaStream,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as MediaStreamAudioSourceNode;
-  }
-
-  createMediaStreamDestination(): MediaStreamAudioDestinationNode {
-    return {
-      stream: new MediaStream(),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 0,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as MediaStreamAudioDestinationNode;
-  }
-
-  getOutputTimestamp(): AudioTimestamp {
-    return {
-      contextTime: this.currentTime,
-      performanceTime: performance.now(),
-    };
-  }
-
-  resume(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  suspend(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  decodeAudioData(
-    audioData: ArrayBuffer,
-    successCallback?: DecodeSuccessCallback | null,
-    errorCallback?: DecodeErrorCallback | null
-  ): Promise<AudioBuffer> {
-    const buffer = this.createBuffer(2, 44100, 44100);
-
-    if (successCallback) {
-      successCallback(buffer);
-    }
-
-    return Promise.resolve(buffer);
-  }
-
-  createBiquadFilter(): BiquadFilterNode {
-    return {
-      type: 'lowpass',
-      frequency: new AudioParamMock(350),
-      detune: new AudioParamMock(0),
-      Q: new AudioParamMock(1),
-      gain: new AudioParamMock(0),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as BiquadFilterNode;
-  }
-
-  createChannelMerger(numberOfInputs = 6): ChannelMergerNode {
-    return {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as ChannelMergerNode;
-  }
-
-  createChannelSplitter(numberOfOutputs = 6): ChannelSplitterNode {
-    return {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as ChannelSplitterNode;
-  }
-
-  createConstantSource(): ConstantSourceNode {
-    return {
-      offset: new AudioParamMock(1),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as ConstantSourceNode;
-  }
-
-  createConvolver(): ConvolverNode {
-    return {
-      buffer: null,
-      normalize: true,
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as ConvolverNode;
-  }
-
-  createDelay(maxDelayTime = 1): DelayNode {
-    return {
-      delayTime: new AudioParamMock(0),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as DelayNode;
-  }
-
-  createIIRFilter(feedforward: number[], feedback: number[]): IIRFilterNode {
-    return {
-      getFrequencyResponse: vi.fn(),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as IIRFilterNode;
-  }
-
-  createPanner(): PannerNode {
-    return {
-      positionX: new AudioParamMock(0),
-      positionY: new AudioParamMock(0),
-      positionZ: new AudioParamMock(0),
-      orientationX: new AudioParamMock(1),
-      orientationY: new AudioParamMock(0),
-      orientationZ: new AudioParamMock(0),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      setPosition: vi.fn(),
-      setOrientation: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as PannerNode;
-  }
-
-  createPeriodicWave(real: Float32Array, imag: Float32Array, constraints?: PeriodicWaveConstraints): PeriodicWave {
-    return {
-      real,
-      imag,
-    } as unknown as PeriodicWave;
-  }
-
-  createStereoPanner(): StereoPannerNode {
-    return {
-      pan: new AudioParamMock(0),
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as StereoPannerNode;
-  }
-
-  createWaveShaper(): WaveShaperNode {
-    return {
-      curve: null,
-      oversample: 'none',
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      channelCount: 2,
-      channelCountMode: 'explicit',
-      channelInterpretation: 'speakers',
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      context: this,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    } as unknown as WaveShaperNode;
-  }
+// Export cleanup function to restore original Blob
+export function restoreBlob() {
+  globalThis.Blob = originalBlob;
 }
