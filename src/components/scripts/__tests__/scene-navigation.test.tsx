@@ -1,142 +1,93 @@
-import { describe, it, vi, expect, beforeEach } from "vitest";
-import {
-  render,
-  screen,
-  within,
-  cleanup,
-  fireEvent,
-} from "@testing-library/react";
-import { SceneNavigation, Scene } from "../scene-navigation";
-
-// Mock components
-vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, ...props }: any) => (
-    <button {...props}>{children}</button>
-  ),
-}));
-
-vi.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: any) => <div>{children}</div>,
-}));
-
-vi.mock("lucide-react", () => ({
-  Clock: () => <div data-testid="clock-icon" />,
-}));
-
-// Mock Framer Motion
-vi.mock("framer-motion", () => ({
-  motion: {
-    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-  },
-  AnimatePresence: ({ children }: any) => <>{children}</>,
-}));
-
-const mockScenes: Scene[] = [
-  {
-    id: "1",
-    number: 1,
-    duration: 180,
-    title: "Scene 1",
-    description: "First scene",
-  },
-  {
-    id: "2",
-    number: 2,
-    duration: 240,
-    title: "Scene 2",
-    description: "Second scene",
-  },
-  {
-    id: "3",
-    number: 3,
-    duration: 160,
-    title: "Scene 3",
-    description: "Third scene",
-  },
-];
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { SceneNavigation, type Scene } from "../scene-navigation";
 
 describe("SceneNavigation", () => {
-  beforeEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
-
-  const renderSceneNavigation = (props = {}) => {
-    const defaultProps = {
-      scenes: mockScenes,
-      currentScene: "1",
-      onSceneSelect: vi.fn(),
-      testMode: true,
-    };
-
-    const mergedProps = { ...defaultProps, ...props };
-    const { container } = render(<SceneNavigation {...mergedProps} />);
-
-    const getSceneNavigation = () => {
-      const nav = screen.getByTestId("scene-navigation");
-      if (!nav) throw new Error("Scene navigation not found");
-      return nav;
-    };
-
-    const getSceneButton = (sceneId: number) => {
-      const nav = getSceneNavigation();
-      const button = within(nav).getByTestId(`scene-button-${sceneId}`);
-      if (!button) throw new Error(`Scene button ${sceneId} not found`);
-      return button;
-    };
-
-    const getAllSceneButtons = () => {
-      const nav = getSceneNavigation();
-      return within(nav).getAllByRole("button");
-    };
-
-    return {
-      container,
-      getSceneNavigation,
-      getSceneButton,
-      getAllSceneButtons,
-    };
-  };
+  const mockScenes: Scene[] = [
+    { id: "1", title: "Opening Scene", duration: 120, number: 1 },
+    { id: "2", title: "Middle Scene", duration: 180, number: 2 },
+    { id: "3", title: "Final Scene", duration: 90, number: 3 },
+  ];
 
   it("renders all scenes", () => {
-    const { getSceneNavigation, getAllSceneButtons } = renderSceneNavigation();
+    render(
+      <SceneNavigation
+        scenes={mockScenes}
+        currentScene="1"
+        onSceneSelect={() => {}}
+      />
+    );
 
-    const nav = getSceneNavigation();
-    expect(nav).toBeInTheDocument();
-
-    const buttons = getAllSceneButtons();
-    expect(buttons).toHaveLength(3);
+    mockScenes.forEach((scene) => {
+      expect(screen.getByText(scene.title!)).toBeInTheDocument();
+    });
   });
 
-  it("updates aria-pressed when current scene changes", () => {
-    const { getSceneButton } = renderSceneNavigation({ currentScene: "2" });
+  it("highlights current scene", () => {
+    render(
+      <SceneNavigation
+        scenes={mockScenes}
+        currentScene="2"
+        onSceneSelect={() => {}}
+      />
+    );
 
-    const button1 = getSceneButton(1);
-    const button2 = getSceneButton(2);
-    const button3 = getSceneButton(3);
-
-    expect(button1.getAttribute("aria-pressed")).toBe("false");
-    expect(button2.getAttribute("aria-pressed")).toBe("true");
-    expect(button3.getAttribute("aria-pressed")).toBe("false");
+    const currentSceneElement = screen
+      .getByText("Middle Scene")
+      .closest("button");
+    expect(currentSceneElement).toHaveClass("bg-secondary");
   });
 
-  it("calls onSceneSelect with correct scene id when clicked", () => {
-    const onSceneSelect = vi.fn();
-    const { getSceneButton } = renderSceneNavigation({ onSceneSelect });
+  it("calls onSceneSelect when clicking a scene", () => {
+    const handleSceneSelect = vi.fn();
+    render(
+      <SceneNavigation
+        scenes={mockScenes}
+        currentScene="1"
+        onSceneSelect={handleSceneSelect}
+      />
+    );
 
-    const button2 = getSceneButton(2);
-    fireEvent.click(button2);
-
-    expect(onSceneSelect).toHaveBeenCalledWith("2");
+    fireEvent.click(screen.getByText("Middle Scene"));
+    expect(handleSceneSelect).toHaveBeenCalledWith("2");
   });
 
-  it("supports keyboard navigation", () => {
-    const onSceneSelect = vi.fn();
-    const { getSceneButton } = renderSceneNavigation({ onSceneSelect });
+  it("handles empty scenes array", () => {
+    render(
+      <SceneNavigation scenes={[]} currentScene="" onSceneSelect={() => {}} />
+    );
+    expect(screen.getByText("No scenes available")).toBeInTheDocument();
+  });
 
-    const button2 = getSceneButton(2);
-    fireEvent.keyDown(button2, { key: "Enter" });
+  it("handles invalid current scene ID", () => {
+    render(
+      <SceneNavigation
+        scenes={mockScenes}
+        currentScene="invalid-id"
+        onSceneSelect={() => {}}
+      />
+    );
 
-    expect(onSceneSelect).toHaveBeenCalledWith("2");
+    // Should still render all scenes but none should be highlighted
+    mockScenes.forEach((scene) => {
+      const sceneElement = screen.getByText(scene.title!).closest("button");
+      expect(sceneElement).not.toHaveClass("bg-secondary");
+    });
+  });
+
+  it("is keyboard navigable", () => {
+    const handleSceneSelect = vi.fn();
+    render(
+      <SceneNavigation
+        scenes={mockScenes}
+        currentScene="1"
+        onSceneSelect={handleSceneSelect}
+      />
+    );
+
+    const firstScene = screen.getByText("Opening Scene");
+    firstScene.focus();
+    fireEvent.keyDown(firstScene, { key: "Enter" });
+    expect(handleSceneSelect).toHaveBeenCalledWith("1");
   });
 });

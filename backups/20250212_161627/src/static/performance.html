@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8">Performance Dashboard</h1>
+        
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">SLA Compliance</h2>
+                <div id="slaCompliance" class="text-4xl font-bold text-blue-600"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Cache Hit Rate</h2>
+                <div id="cacheHitRate" class="text-4xl font-bold text-green-600"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Total API Costs</h2>
+                <div id="totalCosts" class="text-4xl font-bold text-purple-600"></div>
+            </div>
+        </div>
+        
+        <!-- Charts -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Latency Chart -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Operation Latencies</h2>
+                <div class="chart-container">
+                    <canvas id="latencyChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Error Distribution Chart -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Error Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="errorChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Cost Distribution Chart -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">API Cost Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="costChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Cache Performance Chart -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Cache Performance</h2>
+                <div class="chart-container">
+                    <canvas id="cacheChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recommendations -->
+        <div class="mt-8 bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-semibold mb-4">Performance Recommendations</h2>
+            <ul id="recommendations" class="list-disc pl-5 space-y-2"></ul>
+        </div>
+    </div>
+
+    <script>
+        // Utility functions
+        function formatPercent(value) {
+            return (value * 100).toFixed(1) + '%';
+        }
+        
+        function formatCurrency(value) {
+            return '$' + value.toFixed(2);
+        }
+        
+        // Chart configurations
+        const chartConfig = {
+            type: 'bar',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                }
+            }
+        };
+        
+        // Initialize charts
+        const latencyChart = new Chart(
+            document.getElementById('latencyChart'),
+            {
+                ...chartConfig,
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Average Latency (ms)',
+                        data: [],
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)'
+                    }]
+                }
+            }
+        );
+        
+        const errorChart = new Chart(
+            document.getElementById('errorChart'),
+            {
+                type: 'pie',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            'rgba(239, 68, 68, 0.5)',
+                            'rgba(245, 158, 11, 0.5)',
+                            'rgba(16, 185, 129, 0.5)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            }
+        );
+        
+        const costChart = new Chart(
+            document.getElementById('costChart'),
+            {
+                type: 'pie',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            'rgba(139, 92, 246, 0.5)',
+                            'rgba(236, 72, 153, 0.5)',
+                            'rgba(14, 165, 233, 0.5)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            }
+        );
+        
+        const cacheChart = new Chart(
+            document.getElementById('cacheChart'),
+            {
+                type: 'doughnut',
+                data: {
+                    labels: ['Hits', 'Misses'],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            'rgba(16, 185, 129, 0.5)',
+                            'rgba(239, 68, 68, 0.5)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            }
+        );
+        
+        // Update dashboard
+        async function updateDashboard() {
+            try {
+                const summary = await fetch('/api/performance/summary').then(r => r.json());
+                
+                // Update summary cards
+                document.getElementById('slaCompliance').textContent = formatPercent(summary.performance.sla_compliance);
+                document.getElementById('cacheHitRate').textContent = formatPercent(summary.cache.hit_rate);
+                document.getElementById('totalCosts').textContent = formatCurrency(summary.performance.costs.total_cost);
+                
+                // Update latency chart
+                const latencyStats = summary.performance.latency;
+                latencyChart.data.labels = Object.keys(latencyStats);
+                latencyChart.data.datasets[0].data = Object.values(latencyStats).map(s => s.mean * 1000);
+                latencyChart.update();
+                
+                // Update error chart
+                const errorStats = summary.performance.errors.error_distribution;
+                errorChart.data.labels = Object.keys(errorStats);
+                errorChart.data.datasets[0].data = Object.values(errorStats);
+                errorChart.update();
+                
+                // Update cost chart
+                const costStats = summary.performance.costs.cost_distribution;
+                costChart.data.labels = Object.keys(costStats);
+                costChart.data.datasets[0].data = Object.values(costStats);
+                costChart.update();
+                
+                // Update cache chart
+                const cacheStats = summary.cache;
+                cacheChart.data.datasets[0].data = [cacheStats.hits, cacheStats.misses];
+                cacheChart.update();
+                
+                // Update recommendations
+                const recommendationsList = document.getElementById('recommendations');
+                recommendationsList.innerHTML = summary.performance.recommendations
+                    .map(rec => `<li class="text-gray-700">${rec}</li>`)
+                    .join('');
+                
+            } catch (error) {
+                console.error('Error updating dashboard:', error);
+            }
+        }
+        
+        // Update every 5 seconds
+        updateDashboard();
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html> 

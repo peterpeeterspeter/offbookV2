@@ -7,25 +7,38 @@ const createJestConfig = nextJest({
 
 // Add any custom config to be passed to Jest
 const customJestConfig = {
-  preset: "ts-jest",
   testEnvironment: "jsdom",
-  setupFilesAfterEnv: ["<rootDir>/src/setupTests.ts"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   moduleNameMapper: {
-    "\\.(css|less|scss|sass)$": "identity-obj-proxy",
     "^@/(.*)$": "<rootDir>/src/$1",
-    "^lib/(.*)$": "<rootDir>/lib/$1",
+    "^react$": "<rootDir>/node_modules/react",
+    "^react-dom$": "<rootDir>/node_modules/react-dom",
   },
-  testMatch: ["**/__tests__/**/*.test.(ts|tsx)"],
+  moduleDirectories: ["node_modules", "<rootDir>"],
   transform: {
-    "^.+\\.(ts|tsx)$": "ts-jest",
+    "^.+\\.(ts|tsx)$": ["babel-jest", { presets: ["next/babel"] }],
   },
-  modulePathIgnorePatterns: [
+  testPathIgnorePatterns: [
+    "<rootDir>/node_modules/",
+    "<rootDir>/.next/",
     "<rootDir>/backups/",
-    "<rootDir>/config_backup/",
-    "<rootDir>/frontend/",
     "<rootDir>/pipecat-main/",
   ],
-  moduleDirectories: ["node_modules", "src"],
+  modulePathIgnorePatterns: ["<rootDir>/backups/", "<rootDir>/pipecat-main/"],
+  transformIgnorePatterns: [
+    "/node_modules/",
+    "^.+\\.module\\.(css|sass|scss)$",
+  ],
+  collectCoverageFrom: [
+    "src/**/*.{ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/**/*.stories.{ts,tsx}",
+  ],
+  globals: {
+    "ts-jest": {
+      tsconfig: "<rootDir>/tsconfig.json",
+    },
+  },
 };
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

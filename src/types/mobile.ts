@@ -89,64 +89,91 @@ export interface ResourceMetrics {
   priority: string
 }
 
+export interface WebRTCSupport {
+  getUserMedia: boolean
+  peerConnection: boolean
+  dataChannel: boolean
+  screenSharing: boolean
+}
+
+export interface AudioSupport {
+  webAudio: boolean
+  mediaRecorder: boolean
+  audioWorklet: boolean
+  mediaDevices: boolean
+  sampleRate: number
+  channelCount: number
+  audioCodecs: string[]
+  codecSupport: {
+    opus: boolean
+    aac: boolean
+    mp3: boolean
+    webm: boolean
+  }
+}
+
+export interface GraphicsSupport {
+  webgl: boolean
+  webgl2: boolean
+  extensions: string[]
+  maxTextureSize: number
+}
+
+export interface StorageSupport {
+  localStorage: boolean
+  sessionStorage: boolean
+  indexedDB: boolean
+  webSQL: boolean
+  quota: number
+}
+
+export interface MediaSupport {
+  videoCodecs: string[]
+  imageFormats: string[]
+  mediaCapabilities: boolean
+  mediaQueries: Record<string, boolean>
+  pictureInPicture: boolean
+  mediaSession: boolean
+}
+
+export interface PerformanceSupport {
+  performanceObserver: boolean
+  resourceTiming: boolean
+  userTiming: boolean
+  navigationTiming: boolean
+}
+
+export interface InputSupport {
+  touchEvents: boolean
+  pointerEvents: boolean
+  multiTouch: boolean
+  forceTouch: boolean
+}
+
+export interface SensorSupport {
+  accelerometer: boolean
+  gyroscope: boolean
+  magnetometer: boolean
+  ambientLight: boolean
+}
+
+export interface WebAPISupport {
+  serviceWorker: boolean
+  webWorker: boolean
+  webSocket: boolean
+  webAssembly: boolean
+}
+
 export interface BrowserFeatures {
-  audio: {
-    webAudio: boolean;
-    audioWorklet: boolean;
-    mediaRecorder: boolean;
-    audioCodecs: string[];
-  };
-  webRTC: {
-    getUserMedia: boolean;
-    peerConnection: boolean;
-    dataChannel: boolean;
-  };
-  storage: {
-    localStorage: boolean;
-    indexedDB: boolean;
-    cacheAPI: boolean;
-    sessionStorage: boolean;
-    quota: number;
-  };
-  media: {
-    videoCodecs: string[];
-    imageFormats: string[];
-    mediaCapabilities: boolean;
-    mediaQueries: Record<string, boolean>;
-    pictureInPicture: boolean;
-  };
-  performance: {
-    memoryAPI: boolean;
-    performanceAPI: boolean;
-    resourceTiming: boolean;
-    performanceObserver: boolean;
-    userTiming: boolean;
-    navigationTiming: boolean;
-  };
-  input: {
-    touchEvents: boolean;
-    pointerEvents: boolean;
-    multiTouch: boolean;
-    forceTouch: boolean;
-  };
-  sensors: {
-    accelerometer: boolean;
-    gyroscope: boolean;
-    magnetometer: boolean;
-    ambientLight: boolean;
-  };
-  apis: {
-    serviceWorker: boolean;
-    webWorker: boolean;
-    webSocket: boolean;
-    webAssembly: boolean;
-  };
-  graphics: {
-    webgl: boolean;
-    webgl2: boolean;
-    extensions: string[];
-    maxTextureSize: number;
-  };
+  webrtc: WebRTCSupport
+  audio: AudioSupport
+  graphics: GraphicsSupport
+  storage: StorageSupport
+  media: MediaSupport
+  performance: PerformanceSupport
+  input: InputSupport
+  sensors: SensorSupport
+  apis: WebAPISupport
 }
 
 export interface BrowserConfig {
@@ -155,42 +182,6 @@ export interface BrowserConfig {
   vendor: string;
   platform: string;
   hardwareConcurrency: number;
-}
-
-export interface StorageSupport {
-  localStorage: boolean;
-  indexedDB: boolean;
-  cacheAPI: boolean;
-  quota: number;
-}
-
-export interface WebRTCSupport {
-  getUserMedia: boolean;
-  peerConnection: boolean;
-  dataChannel: boolean;
-  screensharing: boolean;
-}
-
-export interface MediaSupport {
-  videoCodecs: string[];
-  imageFormats: string[];
-  mediaCapabilities: boolean;
-  mediaSession: boolean;
-}
-
-export interface AudioSupport {
-  webAudio: boolean;
-  mediaRecorder: boolean;
-  audioWorklet: boolean;
-  audioCodecs: string[];
-}
-
-export interface PerformanceMetrics {
-  memoryUsage: number;
-  cpuUsage: number;
-  frameRate: number;
-  batteryLevel?: number;
-  networkType?: string;
 }
 
 export interface CompatibilityReport {
@@ -203,13 +194,9 @@ export interface CompatibilityReport {
   issues: Array<{
     feature: string
     description: string
-    severity: 'high' | 'medium' | 'low'
+    severity: 'low' | 'medium' | 'high'
   }>
-  recommendations: Array<{
-    feature: string
-    description: string
-    priority: 'high' | 'medium' | 'low'
-  }>
+  recommendations: string[]
 }
 
 export interface BatteryManager {

@@ -28,13 +28,24 @@ describe('LocalStorageEngine', () => {
 
     // Reset encryption mocks
     vi.mocked(encryption.encrypt).mockImplementation(async (data) => {
-      return `encrypted:${JSON.stringify(data)}`;
+      if (data === undefined) return 'undefined';
+      if (data === null) return 'null';
+      // Simulate AES encryption with a more realistic mock
+      const jsonString = JSON.stringify(data);
+      return `AES_ENCRYPTED:${Buffer.from(jsonString).toString('base64')}`;
     });
     vi.mocked(encryption.decrypt).mockImplementation(async (data) => {
-      if (!data.startsWith('encrypted:')) {
+      if (data === 'undefined') return undefined;
+      if (data === 'null') return null;
+      if (!data.startsWith('AES_ENCRYPTED:')) {
         throw new Error('Failed to decrypt data');
       }
-      return JSON.parse(data.slice(10));
+      try {
+        const base64Data = data.replace('AES_ENCRYPTED:', '');
+        return JSON.parse(Buffer.from(base64Data, 'base64').toString());
+      } catch {
+        throw new Error('Failed to decrypt data');
+      }
     });
   });
 
@@ -142,16 +153,30 @@ describe('LocalStorageEngine', () => {
       const mockQuotaError = new Error('QuotaExceededError');
       mockQuotaError.name = 'QuotaExceededError';
 
-      // Mock localStorage.setItem to throw quota error once
-      const originalSetItem = (key: string, value: string) => localStorage.setItem(key, value);
-      let hasThrown = false;
-      localStorage.setItem = vi.fn().mockImplementation((key: string, value: string) => {
-        if (!hasThrown) {
-          hasThrown = true;
-          throw mockQuotaError;
-        }
-        return originalSetItem(key, value);
+      // Create a safe mock implementation
+      const storedItems = new Map<string, string>();
+      const mockLocalStorage = {
+        setItem: vi.fn().mockImplementation((key: string, value: string) => {
+          if (!hasThrown) {
+            hasThrown = true;
+            throw mockQuotaError;
+          }
+          storedItems.set(key, value);
+        }),
+        getItem: vi.fn().mockImplementation((key: string) => storedItems.get(key) || null),
+        removeItem: vi.fn().mockImplementation((key: string) => storedItems.delete(key)),
+        clear: vi.fn().mockImplementation(() => storedItems.clear()),
+        key: vi.fn(),
+        length: 0
+      };
+
+      // Replace localStorage methods
+      const originalLocalStorage = { ...window.localStorage };
+      Object.defineProperty(window, 'localStorage', {
+        value: mockLocalStorage
       });
+
+      let hasThrown = false;
 
       // Set expired item
       await storage.set('expired', testData, { expiresIn: -1 }); // Already expired
@@ -167,8 +192,51 @@ describe('LocalStorageEngine', () => {
       const newItem = await storage.get('new');
       expect(newItem).toEqual(testData);
 
-      // Restore original setItem
-      localStorage.setItem = originalSetItem;
+      // Restore original localStorage
+      Object.defineProperty(window, 'localStorage', {
+        value: originalLocalStorage
+      });
+    });
+
+    it('should handle storage quota exceeded', async () => {
+      const mockQuotaError = new Error('QuotaExceededError');
+      mockQuotaError.name = 'QuotaExceededError';
+
+      // Create a safe mock implementation
+      const storedItems = new Map<string, string>();
+      const mockLocalStorage = {
+        setItem: vi.fn().mockImplementation(() => {
+          throw mockQuotaError;
+        }),
+        getItem: vi.fn().mockImplementation((key: string) => storedItems.get(key) || null),
+        removeItem: vi.fn().mockImplementation((key: string) => storedItems.delete(key)),
+        clear: vi.fn().mockImplementation(() => storedItems.clear()),
+        key: vi.fn(),
+        length: 0
+      };
+
+      // Replace localStorage methods
+      const originalLocalStorage = { ...window.localStorage };
+      Object.defineProperty(window, 'localStorage', {
+        value: mockLocalStorage,
+        configurable: true,
+        writable: true
+      });
+
+      const largeData = {
+        ...testData,
+        value: 'x'.repeat(storage.maxSize), // Exceed storage limit
+      };
+
+      await expect(storage.set('large', largeData))
+        .rejects.toThrow('Failed to write to localStorage: Data size exceeds localStorage limit');
+
+      // Restore original localStorage
+      Object.defineProperty(window, 'localStorage', {
+        value: originalLocalStorage,
+        configurable: true,
+        writable: true
+      });
     });
   });
 
@@ -179,22 +247,15 @@ describe('LocalStorageEngine', () => {
       expect(retrieved).toBeNull();
     });
 
-    it('should handle storage quota exceeded', async () => {
-      const largeData = {
-        ...testData,
-        value: 'x'.repeat(storage.maxSize), // Exceed storage limit
-      };
-
-      await expect(storage.set('large', largeData))
-        .rejects.toThrow(/exceeds localStorage limit/);
-    });
-
     it('should handle encryption failures gracefully', async () => {
       // Mock encryption to fail
       vi.mocked(encryption.encrypt).mockRejectedValueOnce(new Error('Encryption failed'));
 
       await expect(storage.set('secret', testData, { encrypt: true }))
         .rejects.toThrow('Failed to encrypt data');
+
+      // Verify no data was written to localStorage
+      expect(localStorage.getItem('secret')).toBeNull();
     });
   });
 });

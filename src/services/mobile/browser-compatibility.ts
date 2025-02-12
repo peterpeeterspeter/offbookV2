@@ -1,4 +1,4 @@
-import { BrowserFeatures, CompatibilityReport, WebRTCSupport, AudioSupport, StorageSupport, MediaSupport } from '@/types/mobile'
+import { BrowserFeatures, CompatibilityReport, WebRTCSupport, AudioSupport, StorageSupport, MediaSupport, PerformanceSupport } from '@/types/mobile'
 
 export class BrowserCompatibilityTester {
   public async test(): Promise<CompatibilityReport> {
@@ -28,56 +28,133 @@ export class BrowserCompatibilityTester {
     }
   }
 
-  public async checkWebRTCSupport(): Promise<BrowserFeatures['webRTC']> {
+  public async checkWebRTCSupport(): Promise<WebRTCSupport> {
     return {
-      getUserMedia: !!(navigator.mediaDevices?.getUserMedia),
+      getUserMedia: 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices,
       peerConnection: 'RTCPeerConnection' in window,
-      dataChannel: 'RTCDataChannel' in window
+      dataChannel: 'RTCDataChannel' in window,
+      screenSharing: 'mediaDevices' in navigator && 'getDisplayMedia' in navigator.mediaDevices
     }
   }
 
-  public async checkAudioSupport(): Promise<BrowserFeatures['audio']> {
-    const audioContext = 'AudioContext' in window || 'webkitAudioContext' in window
+  private checkCodecSupport(mimeType: string): boolean {
+    try {
+      return MediaRecorder.isTypeSupported(mimeType)
+    } catch {
+      return false
+    }
+  }
+
+  public async checkAudioSupport(): Promise<AudioSupport> {
+    const AudioContext = window.AudioContext || window.webkitAudioContext
+    const hasAudioContext = !!AudioContext
+    const sampleRate = hasAudioContext ? new AudioContext().sampleRate : 0
+    const channelCount = hasAudioContext ? 2 : 0
+
     return {
-      webAudio: audioContext,
-      audioWorklet: audioContext && 'AudioWorklet' in window,
+      webAudio: hasAudioContext,
       mediaRecorder: 'MediaRecorder' in window,
-      audioCodecs: await this.getSupportedAudioCodecs()
+      audioWorklet: hasAudioContext && 'audioWorklet' in AudioContext.prototype,
+      mediaDevices: 'mediaDevices' in navigator,
+      sampleRate,
+      channelCount,
+      audioCodecs: ['audio/webm', 'audio/mp4', 'audio/mpeg'],
+      codecSupport: {
+        opus: this.checkCodecSupport('audio/webm;codecs=opus'),
+        aac: this.checkCodecSupport('audio/mp4;codecs=mp4a.40.2'),
+        mp3: this.checkCodecSupport('audio/mpeg'),
+        webm: this.checkCodecSupport('audio/webm')
+      }
     }
   }
 
   public async checkGraphicsSupport(): Promise<BrowserFeatures['graphics']> {
     const canvas = document.createElement('canvas')
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
-    const extensions = gl ? Array.from(gl.getSupportedExtensions() || []) : []
+    let gl: WebGLRenderingContext | null = null
+    let gl2: WebGL2RenderingContext | null = null
+    let extensions: string[] = []
+    let maxTextureSize = 0
 
-    return {
-      webgl: !!canvas.getContext('webgl'),
-      webgl2: !!canvas.getContext('webgl2'),
-      extensions,
-      maxTextureSize: gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 0
+    try {
+      // Try WebGL2 first, then fall back to WebGL1
+      gl2 = canvas.getContext('webgl2') as WebGL2RenderingContext | null
+      gl = gl2 || (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null
+
+      // Store WebGL support flags
+      const hasWebGL = gl !== null
+      const hasWebGL2 = gl2 !== null
+
+      if (gl) {
+        try {
+          // Get supported extensions from the primary context
+          const supportedExtensions = gl.getSupportedExtensions()
+          if (supportedExtensions !== null) {
+            extensions = [...supportedExtensions]
+          }
+
+          // Get max texture size from the primary context
+          const texSize = gl.getParameter(gl.MAX_TEXTURE_SIZE)
+          maxTextureSize = typeof texSize === 'number' ? texSize : 0
+
+          // Log for debugging
+          console.log('WebGL Context:', {
+            hasWebGL,
+            hasWebGL2,
+            extensions,
+            maxTextureSize,
+            supportedExtensions
+          })
+        } catch (error) {
+          console.error('Error getting WebGL capabilities:', error)
+        }
+      }
+
+      return {
+        webgl: hasWebGL,
+        webgl2: hasWebGL2,
+        extensions,
+        maxTextureSize
+      }
+    } catch (error) {
+      console.error('Error during WebGL support check:', error)
+      return {
+        webgl: false,
+        webgl2: false,
+        extensions: [],
+        maxTextureSize: 0
+      }
+    } finally {
+      // Clean up contexts
+      if (gl && 'getExtension' in gl) {
+        const loseContext = gl.getExtension('WEBGL_lose_context')
+        loseContext?.loseContext()
+      }
+      if (gl2 && 'getExtension' in gl2) {
+        const loseContext = gl2.getExtension('WEBGL_lose_context')
+        loseContext?.loseContext()
+      }
     }
   }
 
-  public async checkStorageSupport(): Promise<BrowserFeatures['storage']> {
-    const quota = await this.getStorageQuota()
+  public async checkStorageSupport(): Promise<StorageSupport> {
     return {
       localStorage: 'localStorage' in window,
       sessionStorage: 'sessionStorage' in window,
       indexedDB: 'indexedDB' in window,
-      cacheAPI: 'caches' in window,
-      quota: quota.granted
+      webSQL: 'openDatabase' in window,
+      quota: await this.getStorageQuota()
     }
   }
 
-  public async checkMediaFeatures(): Promise<BrowserFeatures['media']> {
+  public async checkMediaFeatures(): Promise<MediaSupport> {
     const video = document.createElement('video')
     return {
       videoCodecs: await this.getSupportedVideoCodecs(),
       imageFormats: await this.getSupportedImageFormats(),
       mediaCapabilities: 'mediaCapabilities' in navigator,
       mediaQueries: this.checkMediaQueries(),
-      pictureInPicture: 'pictureInPictureEnabled' in document
+      pictureInPicture: 'pictureInPictureEnabled' in document,
+      mediaSession: 'mediaSession' in navigator
     }
   }
 
@@ -147,12 +224,12 @@ export class BrowserCompatibilityTester {
     return { name, version, engine }
   }
 
-  private async getStorageQuota(): Promise<{ granted: number }> {
+  private async getStorageQuota(): Promise<number> {
     if ('storage' in navigator && 'estimate' in navigator.storage) {
       const { quota = 0 } = await navigator.storage.estimate()
-      return { granted: quota }
+      return quota
     }
-    return { granted: 0 }
+    return 0
   }
 
   private async getSupportedAudioCodecs(): Promise<string[]> {
@@ -194,7 +271,7 @@ export class BrowserCompatibilityTester {
   private analyzeIssues(features: BrowserFeatures): CompatibilityReport['issues'] {
     const issues: CompatibilityReport['issues'] = []
 
-    if (!features.webRTC.getUserMedia) {
+    if (!features.webrtc.getUserMedia) {
       issues.push({
         feature: 'WebRTC',
         description: 'Camera and microphone access not supported',
@@ -248,69 +325,41 @@ export class BrowserCompatibilityTester {
   private generateRecommendations(
     features: BrowserFeatures,
     issues: CompatibilityReport['issues']
-  ): CompatibilityReport['recommendations'] {
-    const recommendations: CompatibilityReport['recommendations'] = []
+  ): string[] {
+    const recommendations: string[] = []
 
-    issues.forEach(issue => {
-      switch (issue.feature) {
-        case 'WebRTC':
-          recommendations.push({
-            feature: 'WebRTC',
-            description: 'Consider implementing a fallback to traditional file upload',
-            priority: 'high'
-          })
-          break
-        case 'Web Audio':
-          recommendations.push({
-            feature: 'Audio',
-            description: 'Use basic HTML5 audio elements as fallback',
-            priority: 'medium'
-          })
-          break
-        case 'WebGL':
-          recommendations.push({
-            feature: 'Graphics',
-            description: 'Provide 2D canvas fallback for graphics',
-            priority: 'high'
-          })
-          break
-        case 'IndexedDB':
-          recommendations.push({
-            feature: 'Storage',
-            description: 'Use localStorage for critical data storage',
-            priority: 'high'
-          })
-          break
-        case 'Performance Observer':
-          recommendations.push({
-            feature: 'Performance',
-            description: 'Implement basic performance tracking using Date.now()',
-            priority: 'medium'
-          })
-          break
-        case 'Touch Events':
-          recommendations.push({
-            feature: 'Input',
-            description: 'Ensure all interactive elements work with mouse events',
-            priority: 'high'
-          })
-          break
-      }
-    })
+    if (issues.length > 0) {
+      recommendations.push('Update to the latest browser version for better compatibility')
+    }
 
-    if (!features.apis.serviceWorker) {
-      recommendations.push({
-        feature: 'Offline Support',
-        description: 'Implement basic caching using localStorage',
-        priority: 'medium'
-      })
+    if (!features.webrtc.getUserMedia) {
+      recommendations.push('Enable camera and microphone permissions for audio/video features')
+    }
+
+    if (!features.audio.webAudio) {
+      recommendations.push('Use a browser that supports Web Audio API for advanced audio features')
+    }
+
+    if (!features.storage.indexedDB) {
+      recommendations.push('Enable storage permissions for offline functionality')
     }
 
     return recommendations
   }
 
   public async generateCompatibilityReport(): Promise<CompatibilityReport> {
-    const features = await this.detectFeatures()
+    const features = {
+      webrtc: await this.checkWebRTCSupport(),
+      audio: await this.checkAudioSupport(),
+      graphics: await this.checkGraphicsSupport(),
+      storage: await this.checkStorageSupport(),
+      media: await this.checkMediaFeatures(),
+      performance: await this.checkPerformanceAPIs(),
+      input: await this.checkTouchFeatures(),
+      sensors: await this.checkSensorAPIs(),
+      apis: await this.checkWebAPIs()
+    }
+
     const issues = this.analyzeIssues(features)
     const recommendations = this.generateRecommendations(features, issues)
 
@@ -464,6 +513,64 @@ export class BrowserCompatibilityTester {
     return {
       deviceReconnected: hasDevices,
       streamsContinued: hasDevices
+    }
+  }
+
+  public async checkWebGLSupport() {
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl') as WebGLRenderingContext | null
+    const gl2 = canvas.getContext('webgl2') as WebGL2RenderingContext | null
+
+    let maxTextureSize = 0
+    if (gl) {
+      try {
+        maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
+      } catch {
+        maxTextureSize = 0
+      }
+    }
+
+    return {
+      webgl: !!gl,
+      webgl2: !!gl2,
+      extensions: gl ? gl.getSupportedExtensions() || [] : [],
+      maxTextureSize
+    }
+  }
+
+  public async checkPerformanceAPIs(): Promise<PerformanceSupport> {
+    return {
+      performanceObserver: 'PerformanceObserver' in window,
+      resourceTiming: 'performance' in window && !!window.performance.getEntriesByType,
+      userTiming: 'performance' in window && !!window.performance.mark,
+      navigationTiming: 'performance' in window && !!window.performance.timing
+    }
+  }
+
+  public async checkTouchFeatures() {
+    return {
+      touchEvents: 'ontouchstart' in window,
+      pointerEvents: 'PointerEvent' in window,
+      multiTouch: 'maxTouchPoints' in navigator && navigator.maxTouchPoints > 1,
+      forceTouch: 'ontouchforcechange' in window
+    }
+  }
+
+  public async checkSensorAPIs() {
+    return {
+      accelerometer: 'Accelerometer' in window,
+      gyroscope: 'Gyroscope' in window,
+      magnetometer: 'Magnetometer' in window,
+      ambientLight: 'AmbientLightSensor' in window
+    }
+  }
+
+  public async checkWebAPIs() {
+    return {
+      serviceWorker: 'serviceWorker' in navigator,
+      webWorker: 'Worker' in window,
+      webSocket: 'WebSocket' in window,
+      webAssembly: 'WebAssembly' in window
     }
   }
 }

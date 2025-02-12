@@ -52,10 +52,19 @@ export class AccessControlService {
       }
     }
 
-    // Check ownership
-    if (metadata.accessLevel === 'private' && metadata.createdBy !== this.currentUser.id) {
-      this.logAccess(resourceId, false, 'Not owner of private data');
-      return false;
+    // Check ownership for private data
+    if (metadata.accessLevel === 'private') {
+      // Admin can access all private data
+      if (this.currentUser.role === 'admin') {
+        this.logAccess(resourceId, true, 'Admin access granted');
+        return true;
+      }
+
+      // Others can only access their own private data
+      if (metadata.createdBy !== this.currentUser.id) {
+        this.logAccess(resourceId, false, 'Not owner of private data');
+        return false;
+      }
     }
 
     // Check if data requires special handling

@@ -13,16 +13,21 @@ import type { DeepSeekResponse, EmotionSuggestion } from "@/services/types";
 
 // Mock the detectEmotions service
 vi.mock("@/services/deepseek", () => ({
-  detectEmotions: vi.fn().mockImplementation(async () => ({
-    suggestions: [
-      {
-        emotion: "joy",
-        intensity: 0.8,
-        confidence: 0.9,
-      },
-    ] as EmotionSuggestion[],
-    error: undefined,
-  })),
+  detectEmotions: vi.fn().mockImplementation(async (text: string) => {
+    if (text === "error-test") {
+      throw new Error("API Error");
+    }
+    return {
+      suggestions: [
+        {
+          emotion: "joy",
+          intensity: 0.8,
+          confidence: 0.9,
+        },
+      ] as EmotionSuggestion[],
+      error: undefined,
+    };
+  }),
 }));
 
 describe("EmotionHighlighter", () => {
@@ -235,7 +240,7 @@ describe("EmotionHighlighter", () => {
     expect(onUpdate).toHaveBeenCalledWith("{Test|joy|8} content");
   });
 
-  it("handles read-only mode", async () => {
+  it("handles read-only mode", () => {
     render(
       <EmotionHighlighter
         content="Test content"
@@ -245,73 +250,81 @@ describe("EmotionHighlighter", () => {
     );
 
     const textElement = screen.getByText("Test content");
-    await act(async () => {
-      fireEvent.mouseUp(textElement);
-    });
+    fireEvent.mouseUp(textElement);
 
+    // Verify that emotion picker is not shown in read-only mode
     expect(screen.queryByText("Emotion")).not.toBeInTheDocument();
   });
 
   it("handles emotion detection errors", async () => {
     // Mock detectEmotions to throw an error
-    const mockError = new Error("API Error");
-    mockError.name = "DeepSeekError";
-    vi.mocked(detectEmotions).mockRejectedValueOnce(mockError);
+    vi.mocked(detectEmotions).mockRejectedValueOnce(new Error("API Error"));
 
-    await act(async () => {
-      render(
-        <EmotionHighlighter
-          content="Test content"
-          readOnly={false}
-          onUpdate={() => {}}
-        />
-      );
-    });
+    render(<EmotionHighlighter content="Test content" onSelect={() => {}} />);
 
-    const textElement = screen.getByText("Test content");
+    // Simulate text selection with error-triggering text
+    const content = screen.getByTestId("emotion-highlighter");
+    mockSelection.toString = () => "error-test";
+    fireEvent.mouseUp(content);
 
-    await act(async () => {
-      fireEvent.mouseUp(textElement);
-    });
-
-    // Wait for error to be handled
     await waitFor(() => {
-      expect(detectEmotions).toHaveBeenCalled();
+      expect(screen.getByText(/API Error/i)).toBeInTheDocument();
     });
-
-    // Verify error state (you might want to add error UI elements to check)
-    expect(screen.queryByText("joy")).not.toBeInTheDocument();
   });
 
   it("updates intensity value", async () => {
-    const user = userEvent.setup();
+    const onSelect = vi.fn();
     render(
       <EmotionHighlighter
         content="Test content"
         readOnly={false}
-        onUpdate={() => {}}
+        onSelect={onSelect}
       />
     );
 
-    // Show picker
-    const textElement = screen.getByText("Test content");
-    await act(async () => {
-      fireEvent.mouseUp(textElement);
-    });
+    // Simulate text selection
+    const content = screen.getByTestId("emotion-highlighter");
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
 
-    // Find and update intensity slider
-    const intensitySlider = screen.getByRole("slider") as HTMLInputElement;
     await act(async () => {
-      fireEvent.change(intensitySlider, { target: { value: "5" } });
-      // Wait for state updates
+      fireEvent.mouseUp(content);
+      // Wait for emotion detection
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(intensitySlider.value).toBe("5");
+    // Find and update intensity slider
+    const intensitySlider = await screen.findByRole("slider");
+    await act(async () => {
+      await userEvent.type(intensitySlider, "5");
+      // Wait for state update
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(intensitySlider).toHaveValue("5");
+
+    // Clean up selection
+    selection?.removeAllRanges();
   });
 
   it("closes emotion picker on cancel", async () => {
     const user = userEvent.setup();
+
+    // Mock detectEmotions with a successful response
+    vi.mocked(detectEmotions).mockResolvedValueOnce({
+      suggestions: [
+        {
+          emotion: "joy",
+          intensity: 0.8,
+          confidence: 0.9,
+        },
+      ],
+      error: undefined,
+    });
+
     render(
       <EmotionHighlighter
         content="Test content"
@@ -320,21 +333,27 @@ describe("EmotionHighlighter", () => {
       />
     );
 
-    // Show picker
+    // Show picker with non-error text
     const textElement = screen.getByText("Test content");
+    mockSelection.toString = () => "Test";
     await act(async () => {
       fireEvent.mouseUp(textElement);
+      // Wait for emotion detection to complete
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // Wait for emotion detection to complete
+    await waitFor(() => {
+      expect(screen.getByText("joy")).toBeInTheDocument();
     });
 
     // Click cancel button
     const cancelButton = screen.getByText("Cancel");
     await act(async () => {
       await user.click(cancelButton);
-      // Wait for state updates to complete
-      await new Promise((resolve) => setTimeout(resolve, 100));
     });
 
     // Verify picker is closed
-    expect(screen.queryByLabelText("Emotion")).not.toBeInTheDocument();
+    expect(screen.queryByText("joy")).not.toBeInTheDocument();
   });
 });

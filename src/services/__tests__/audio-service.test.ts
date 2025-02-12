@@ -3,6 +3,7 @@ import { AudioService } from '../audio-service';
 import { AudioServiceState, AudioServiceStateData } from '../audio-state';
 import type { AudioServiceType } from '@/components/SceneFlow';
 import { waitForStateUpdate } from '../../test/setup';
+import { AudioServiceError } from '@/types/audio';
 
 // Mock VADService
 vi.mock('../vad-service', () => ({
@@ -13,6 +14,11 @@ vi.mock('../vad-service', () => ({
     cleanup: vi.fn().mockResolvedValue(undefined)
   }))
 }));
+
+// Extend global fetch type
+declare global {
+  var fetch: Mock<Parameters<typeof fetch>, ReturnType<typeof fetch>>;
+}
 
 // Mock MediaRecorder with proper cleanup
 class MockMediaRecorder {
@@ -146,75 +152,54 @@ describe('AudioService', () => {
   beforeEach(setupTest);
   afterEach(cleanupTest);
 
+  beforeEach(() => {
+    // Reset fetch mock
+    (global.fetch as Mock).mockClear();
+  });
+
   describe('Initialization', () => {
-    it('should initialize successfully with VAD enabled', async () => {
+    it('should initialize successfully', async () => {
       await AudioService.setup();
-      await waitForStateUpdate();
-
-      expect(AudioService.getState().state).toBe(AudioServiceState.READY);
+      const state = AudioService.getState();
+      expect(state.state).toBe(AudioServiceState.READY);
+      expect(state.error).toBeUndefined();
     });
 
-    it('should initialize successfully without VAD', async () => {
-      await AudioService.setup();
-      await waitForStateUpdate();
+    it('should handle initialization failure', async () => {
+      // Mock getUserMedia to fail
+      (navigator.mediaDevices.getUserMedia as Mock).mockImplementationOnce(() =>
+        Promise.reject(new Error('Permission denied'))
+      );
 
-      expect(AudioService.getState().state).toBe(AudioServiceState.READY);
-    });
-
-    it('should handle initialization errors', async () => {
-      const mockGetUserMedia = navigator.mediaDevices.getUserMedia as ReturnType<typeof vi.fn>;
-      mockGetUserMedia.mockRejectedValueOnce(new Error('Init failed'));
-
-      await expect(AudioService.setup()).rejects.toThrow('Init failed');
-      expect(AudioService.getState().state).toBe(AudioServiceState.ERROR);
+      await expect(AudioService.setup()).rejects.toThrow();
+      const state = AudioService.getState();
+      expect(state.state).toBe(AudioServiceState.ERROR);
+      expect(state.error).toBeDefined();
+      expect(state.error?.code).toBe(AudioServiceError.INITIALIZATION_FAILED);
     });
   });
 
   describe('Recording', () => {
     beforeEach(async () => {
       await AudioService.setup();
-      await waitForStateUpdate();
     });
 
-    it('should start recording with VAD', async () => {
+    it('should start recording successfully', async () => {
       await AudioService.startRecording('test-session');
-      await waitForStateUpdate();
-
-      expect(AudioService.getState().state).toBe(AudioServiceState.RECORDING);
+      const state = AudioService.getState();
+      expect(state.state).toBe(AudioServiceState.RECORDING);
     });
 
-    it('should stop recording and return metrics', async () => {
+    it('should stop recording and return result', async () => {
       await AudioService.startRecording('test-session');
-      await waitForStateUpdate();
-
       const result = await AudioService.stopRecording('test-session');
-      await waitForStateUpdate();
 
       expect(result).toBeDefined();
-      expect(AudioService.getState().state).toBe(AudioServiceState.READY);
-    });
+      expect(result.audioData).toBeDefined();
+      expect(result.duration).toBeGreaterThan(0);
 
-    it('should handle recording errors', async () => {
-      const mockError = new Error('Recording failed');
-      const mockMediaRecorder = {
-        start: vi.fn().mockImplementation(() => {
-          throw mockError;
-        }),
-        stop: vi.fn(),
-        state: 'inactive'
-      };
-
-      vi.spyOn(window, 'MediaRecorder').mockImplementation(() => mockMediaRecorder as any);
-
-      await expect(AudioService.startRecording('test-session')).rejects.toThrow('Recording failed');
-      expect(AudioService.getState().state).toBe(AudioServiceState.ERROR);
-    });
-
-    it('should start and stop recording', async () => {
-      const sessionId = 'test-session-1';
-      await AudioService.startRecording(sessionId);
-      const result = await AudioService.stopRecording(sessionId);
-      expect(result).toBeDefined();
+      const state = AudioService.getState();
+      expect(state.state).toBe(AudioServiceState.READY);
     });
 
     it('should handle recording errors', async () => {
@@ -251,6 +236,62 @@ describe('AudioService', () => {
     });
   });
 
+  describe('Transcription', () => {
+    it('should transcribe audio successfully', async () => {
+      const audioData = new ArrayBuffer(1024);
+      const result = await AudioService.transcribe(audioData);
+
+      expect(result).toBeDefined();
+      expect(result.text).toBe('Mocked transcription');
+      expect(result.confidence).toBe(0.95);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('whisper'),
+        expect.objectContaining({
+          method: 'POST',
+          body: audioData
+        })
+      );
+    });
+
+    it('should handle transcription failure', async () => {
+      (global.fetch as Mock).mockImplementationOnce(() =>
+        Promise.resolve({ ok: false, status: 500 })
+      );
+
+      const audioData = new ArrayBuffer(1024);
+      await expect(AudioService.transcribe(audioData)).rejects.toThrow();
+    });
+  });
+
+  describe('Emotion Detection', () => {
+    it('should detect emotion successfully', async () => {
+      const audioData = new ArrayBuffer(1024);
+      const result = await AudioService.detectEmotion(audioData);
+
+      expect(result).toBeDefined();
+      expect(result?.type).toBe('happy');
+      expect(result?.confidence).toBe(0.85);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('emotion'),
+        expect.objectContaining({
+          method: 'POST',
+          body: audioData
+        })
+      );
+    });
+
+    it('should handle emotion detection failure', async () => {
+      (global.fetch as Mock).mockImplementationOnce(() =>
+        Promise.resolve({ ok: false, status: 500 })
+      );
+
+      const audioData = new ArrayBuffer(1024);
+      await expect(AudioService.detectEmotion(audioData)).rejects.toThrow();
+    });
+  });
+
   describe('Resource Management', () => {
     it('should clean up resources on stop', async () => {
       await AudioService.setup();
@@ -274,6 +315,13 @@ describe('AudioService', () => {
 
       expect(AudioService.getState().state).toBe(AudioServiceState.UNINITIALIZED);
     });
+
+    it('should handle cleanup during recording', async () => {
+      await AudioService.startRecording('test-session');
+      await AudioService.cleanup();
+      const state = AudioService.getState();
+      expect(state.state).toBe(AudioServiceState.UNINITIALIZED);
+    });
   });
 
   describe('State Management', () => {
@@ -292,7 +340,7 @@ describe('AudioService', () => {
       await AudioService.startRecording('test-session');
       await waitForStateUpdate();
 
-      const state = AudioService.getState();
+      const state = AudioService.getState() as AudioServiceStateData;
       expect(state.vad?.speaking).toBe(true);
     });
 

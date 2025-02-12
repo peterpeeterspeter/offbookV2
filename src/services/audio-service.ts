@@ -1,26 +1,20 @@
-import type { AudioServiceType } from "@/components/SceneFlow";
 import { AudioStateManager } from './audio-state';
 import type { AudioServiceStateData } from './audio-state';
-import { AudioServiceState, AudioServiceEvent, AudioServiceError, AudioErrorCategory } from '@/types/audio';
-import type {
-  AudioConfig,
+import {
+  AudioServiceState,
+  AudioServiceEvent,
+  AudioServiceError,
+  AudioErrorCategory,
+  AudioService,
   RecordingResult,
   RecordingSession,
-  TTSConfig,
-  VADConfig,
-  ElevenLabsConfig,
-  TTSParams,
-  TTSSession,
-  CueSignal,
-  CueDisplay,
-  SceneProgression,
   AudioErrorDetails,
   VADState,
-  AudioService
+  type AudioServiceContext
 } from '@/types/audio';
+import type { ServiceState } from '@/types/core';
 import { VADService } from './vad-service';
-import { createMockBlobAsync } from '../tests/mocks/browser-apis';
-import { ServiceError } from './service-integration';
+import { ScriptAnalysisError, ScriptAnalysisErrorCode } from '../types/errors';
 
 // Type declaration for WebKit AudioContext
 declare global {
@@ -28,67 +22,6 @@ declare global {
     webkitAudioContext: typeof AudioContext;
   }
 }
-
-// Mock implementations for external dependencies
-const mockTransformers = {
-  pipeline: async () => ({
-    transcribe: async (audio: any) => ({ text: "Mocked transcription" })
-  })
-};
-
-/**
- * Configuration for Voice Activity Detection
- */
-class MockVAD {
-  constructor(config: VADConfig) {}
-  processAudio() {
-    return Promise.resolve({ speech: { active: true } });
-  }
-}
-
-/**
- * Configuration for ElevenLabs text-to-speech service
- */
-class MockElevenLabs {
-  constructor(config: ElevenLabsConfig) {}
-  textToSpeech(params: TTSParams) {
-    return Promise.resolve(new Blob());
-  }
-  getVoices() {
-    return Promise.resolve([
-      { voice_id: "mock_voice", name: "Mock Voice" }
-    ]);
-  }
-}
-
-// Use mock implementations
-const { pipeline } = mockTransformers;
-const VAD = MockVAD;
-const ElevenLabs = MockElevenLabs;
-
-/**
- * Audio configuration
- */
-
-/**
- * Represents an active recording session
- */
-
-/**
- * Represents an active text-to-speech session
- */
-
-/**
- * Cue signal for scene progression
- */
-
-/**
- * Visual cue display configuration
- */
-
-/**
- * Scene progression tracking
- */
 
 /**
  * Implementation of the audio service handling recording, playback,
@@ -105,6 +38,20 @@ export class AudioServiceImpl implements AudioService {
   private isCleaningUp = false;
   private currentSession: RecordingSession | null = null;
   private ttsInitialized = false;
+  private state: AudioServiceStateData = {
+    state: AudioServiceState.UNINITIALIZED,
+    context: {
+      sampleRate: 44100,
+      channelCount: 2,
+      vadBufferSize: 2048,
+      noiseThreshold: 0.2,
+      silenceThreshold: 0.1,
+      isContextRunning: false
+    },
+    isContextRunning: false,
+    sampleRate: 44100
+  };
+  private listeners: ((state: ServiceState<AudioServiceContext>) => void)[] = [];
 
   private constructor() {
     this.stateManager = AudioStateManager.getInstance();
@@ -115,17 +62,16 @@ export class AudioServiceImpl implements AudioService {
   private initializeState(): void {
     this.stateManager.transition(AudioServiceEvent.INITIALIZE, {
       state: AudioServiceState.UNINITIALIZED,
-      error: undefined,
       context: {
         sampleRate: 44100,
-        channels: 2,
-        isContextRunning: false,
-        vadEnabled: false,
-        vadThreshold: 0.5,
-        vadSampleRate: 16000,
+        channelCount: 2,
         vadBufferSize: 2048,
         noiseThreshold: 0.2,
-        silenceThreshold: 0.1
+        silenceThreshold: 0.1,
+        isContextRunning: false,
+        vadEnabled: true,
+        vadThreshold: 0.5,
+        vadSampleRate: 16000
       }
     });
   }
@@ -144,83 +90,256 @@ export class AudioServiceImpl implements AudioService {
 
   async setup(): Promise<void> {
     try {
-      if (this.stateManager.getState().state !== AudioServiceState.UNINITIALIZED) {
+      const currentState = this.stateManager.getState().state;
+
+      // If already initializing, wait for completion or timeout
+      if (currentState === AudioServiceState.INITIALIZING) {
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'Audio service is already initializing'
+        });
+      }
+
+      // If in ERROR or READY state, cleanup first
+      if (currentState === AudioServiceState.ERROR || currentState === AudioServiceState.READY) {
         await this.cleanup();
       }
 
+      // Start initialization
       this.stateManager.transition(AudioServiceEvent.INITIALIZE);
 
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
-        throw new ServiceError('INITIALIZATION_FAILED', 'AudioContext not supported in this environment');
-      }
-
-      this.audioContext = new AudioContextClass();
-
       try {
-        this.mediaStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
+        // Check browser compatibility first
+        if (!window.AudioContext && !window.webkitAudioContext) {
+          throw new ScriptAnalysisError({
+            code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+            message: 'WebAudio API is not supported in this browser'
+          });
+        }
+
+        // Initialize audio context with error handling
+        if (!this.audioContext) {
+          try {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          } catch (error) {
+            throw new ScriptAnalysisError({
+              code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+              message: 'Failed to create AudioContext',
+              details: { originalError: error }
+            });
           }
-        });
+        }
+
+        // Ensure audio context is in running state
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume();
+        }
+
+        // Request media stream with constraints
+        try {
+          this.mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+        } catch (error) {
+          if (error instanceof DOMException) {
+            if (error.name === 'NotAllowedError') {
+              throw new ScriptAnalysisError({
+                code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+                message: 'Microphone permission denied',
+                details: { originalError: error }
+              });
+            } else if (error.name === 'NotFoundError') {
+              throw new ScriptAnalysisError({
+                code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+                message: 'No audio input device found',
+                details: { originalError: error }
+              });
+            }
+          }
+          throw new ScriptAnalysisError({
+            code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+            message: 'Failed to access audio device',
+            details: { originalError: error }
+          });
+        }
+
+        // Initialize VAD service with retry logic
+        let vadInitAttempts = 0;
+        const maxVadAttempts = 3;
+        while (vadInitAttempts < maxVadAttempts) {
+          try {
+            await this.initializeVAD();
+            break;
+          } catch (error) {
+            vadInitAttempts++;
+            if (vadInitAttempts === maxVadAttempts) {
+              throw new ScriptAnalysisError({
+                code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+                message: 'Failed to initialize voice activity detection',
+                details: { originalError: error }
+              });
+            }
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+
+        // Update state with successful initialization
+        const stateAfterInit = this.stateManager.getState().state;
+        if (stateAfterInit === AudioServiceState.INITIALIZING) {
+          this.stateManager.transition(AudioServiceEvent.INITIALIZED, {
+            context: {
+              vadBufferSize: 2048,
+              noiseThreshold: 0.2,
+              silenceThreshold: 0.1,
+              sampleRate: this.audioContext.sampleRate,
+              channelCount: 1,
+              isContextRunning: this.audioContext.state === 'running',
+              vadEnabled: true,
+              vadThreshold: 0.5,
+              vadSampleRate: 16000
+            }
+          });
+        }
       } catch (error) {
-        throw new ServiceError('INITIALIZATION_FAILED', 'Failed to access microphone');
-      }
+        // Handle initialization errors with detailed error information
+        const errorDetails = error instanceof ScriptAnalysisError ? error : new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+          message: error instanceof Error ? error.message : 'Failed to initialize audio service',
+          details: { originalError: error }
+        });
 
-      const state = this.stateManager.getState();
-      if (state.context.vadEnabled) {
-        await this.initializeVAD();
+        this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
+        throw errorDetails;
       }
-
-      this.stateManager.transition(AudioServiceEvent.INITIALIZED);
     } catch (error) {
-      console.error('Audio setup failed:', error);
-      this.stateManager.transition(AudioServiceEvent.ERROR, {
-        error: this.stateManager.createError(AudioServiceError.INITIALIZATION_FAILED, {
-          originalError: error instanceof Error ? error : new ServiceError('UNKNOWN_ERROR', String(error))
-        })
+      // Handle setup errors
+      if (error instanceof ScriptAnalysisError) {
+        throw error;
+      }
+      const errorDetails = new ScriptAnalysisError({
+        code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+        message: error instanceof Error ? error.message : 'Failed to setup audio service',
+        details: { originalError: error }
       });
-      throw error;
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
+      throw errorDetails;
     }
   }
 
   private async initializeVAD(): Promise<void> {
     try {
+      // Validate media stream
       if (!this.mediaStream) {
-        throw new Error('Media stream not available');
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'Media stream not available'
+        });
       }
 
+      // Validate audio tracks
+      const audioTracks = this.mediaStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'No audio tracks available in media stream'
+        });
+      }
+
+      // Validate track state
+      const activeTrack = audioTracks[0];
+      if (!activeTrack?.enabled || activeTrack?.muted || activeTrack?.readyState !== 'live') {
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'Audio track is not in a valid state',
+          details: {
+            enabled: activeTrack?.enabled,
+            muted: activeTrack?.muted,
+            readyState: activeTrack?.readyState
+          }
+        });
+      }
+
+      // Get and validate state configuration
       const state = this.stateManager.getState();
-      this.vadService = new VADService({
-        sampleRate: state.context.vadSampleRate,
-        bufferSize: state.context.vadBufferSize,
+      const requiredConfig = {
+        vadSampleRate: state.context.vadSampleRate,
+        vadBufferSize: state.context.vadBufferSize,
         noiseThreshold: state.context.noiseThreshold,
         silenceThreshold: state.context.silenceThreshold
+      };
+
+      // Check for missing configuration
+      const missingConfig = Object.entries(requiredConfig)
+        .filter(([, value]) => value === undefined)
+        .map(([key]) => key);
+
+      if (missingConfig.length > 0) {
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'VAD configuration is incomplete',
+          details: { missingParameters: missingConfig }
+        });
+      }
+
+      // Initialize VAD service with validated configuration
+      this.vadService = new VADService({
+        sampleRate: requiredConfig.vadSampleRate!,
+        bufferSize: requiredConfig.vadBufferSize!,
+        noiseThreshold: requiredConfig.noiseThreshold!,
+        silenceThreshold: requiredConfig.silenceThreshold!
       });
 
+      // Initialize VAD with media stream
       await this.vadService.initialize(this.mediaStream);
 
+      // Set up VAD state listener with error handling
       this.vadService.addStateListener((vadState) => {
-        if (this.stateManager.getState().state === AudioServiceState.RECORDING) {
-          this.stateManager.transition(AudioServiceEvent.VAD_UPDATE, {
-            vad: {
+        try {
+          if (this.stateManager.getState().state === AudioServiceState.RECORDING) {
+            const vadUpdate: VADState = {
+              enabled: true,
+              threshold: state.context.vadThreshold || 0.5,
+              sampleRate: requiredConfig.vadSampleRate!,
+              bufferSize: requiredConfig.vadBufferSize!,
+              active: vadState.speaking || false,
               speaking: vadState.speaking,
               noiseLevel: vadState.noiseLevel,
               lastActivity: vadState.lastActivity,
               confidence: vadState.confidence
-            }
+            };
+            this.stateManager.transition(AudioServiceEvent.VAD_UPDATE, { vad: vadUpdate });
+          }
+        } catch (error) {
+          console.error('Error in VAD state listener:', error);
+          // Don't throw here as this is an event listener
+          this.stateManager.transition(AudioServiceEvent.ERROR, {
+            error: new ScriptAnalysisError({
+              code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+              message: 'Error processing VAD update',
+              details: { originalError: error }
+            })
           });
         }
       });
     } catch (error) {
       console.error('VAD initialization failed:', error);
-      throw error;
+      if (error instanceof ScriptAnalysisError) {
+        throw error;
+      }
+      throw new ScriptAnalysisError({
+        code: ScriptAnalysisErrorCode.INITIALIZATION_FAILED,
+        message: 'Failed to initialize voice activity detection',
+        details: { originalError: error }
+      });
     }
   }
 
-  async initializeTTS(sessionId: string, userRole: string): Promise<void> {
+  async initializeTTS(): Promise<void> {
     if (this.ttsInitialized) {
       return;
     }
@@ -243,96 +362,176 @@ export class AudioServiceImpl implements AudioService {
 
   async startRecording(sessionId: string): Promise<void> {
     try {
-      if (!this.mediaStream || !this.audioContext) {
-        await this.setup();
+      const currentState = this.stateManager.getState().state;
+      if (currentState === AudioServiceState.ERROR) {
+        await this.setup(); // Try to recover from error state
       }
 
-      if (this.stateManager.getState().state === AudioServiceState.RECORDING) {
-        throw new Error('Already recording');
+      if (currentState !== AudioServiceState.READY) {
+        throw new Error('Invalid state for recording: ' + currentState);
       }
 
+      if (!this.mediaStream) {
+        throw new Error('Media stream not available');
+      }
+
+      this.mediaRecorder = new MediaRecorder(this.mediaStream);
       this.audioChunks = [];
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.start();
       this.currentSession = {
         id: sessionId,
         startTime: Date.now(),
         duration: 0,
         audioData: new Float32Array()
       };
-
       this.stateManager.transition(AudioServiceEvent.RECORDING_START);
-
-      if (this.mediaStream) {
-        this.mediaRecorder = new MediaRecorder(this.mediaStream);
-        this.mediaRecorder.ondataavailable = this.handleDataAvailable.bind(this);
-        this.mediaRecorder.start();
-      } else {
-        throw new Error('Media stream not available');
-      }
+      return;
     } catch (error) {
-      const errorDetails: AudioErrorDetails = {
-        name: 'Recording Start',
-        code: AudioServiceError.RECORDING_FAILED,
-        category: AudioErrorCategory.RECORDING,
-        message: error instanceof Error ? error.message : 'Failed to start recording',
-        retryable: true
-      };
-      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
-      throw error;
+      this.handleError(error, ScriptAnalysisErrorCode.PROCESSING_FAILED);
+      return;
     }
   }
 
   async stopRecording(sessionId: string): Promise<RecordingResult> {
     try {
-      if (!this.mediaRecorder || !this.currentSession) {
-        throw new Error('No active recording session');
+      const currentState = this.stateManager.getState().state;
+
+      // First check if we're in the correct state
+      if (currentState !== AudioServiceState.RECORDING) {
+        const error = new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: `Cannot stop recording in state: ${currentState}. Must be in RECORDING state.`
+        });
+        this.stateManager.transition(AudioServiceEvent.ERROR, {
+          error: {
+            code: ScriptAnalysisErrorCode.INVALID_STATE,
+            message: error.message,
+            details: error
+          }
+        });
+        throw error;
       }
 
-      this.mediaRecorder.stop();
-      this.stateManager.transition(AudioServiceEvent.RECORDING_STOP);
+      // Then check if we have a valid session
+      if (!this.currentSession || this.currentSession.id !== sessionId) {
+        const error = new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_SESSION,
+          message: 'Invalid session ID'
+        });
+        this.stateManager.transition(AudioServiceEvent.ERROR, {
+          error: {
+            code: ScriptAnalysisErrorCode.INVALID_SESSION,
+            message: error.message,
+            details: error
+          }
+        });
+        throw error;
+      }
 
-      const audioData = await this.processRecordedAudio();
-      const duration = Date.now() - this.currentSession.startTime;
+      // Finally check if we have a valid media recorder
+      if (!this.mediaRecorder) {
+        const error = new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+          message: 'MediaRecorder not initialized'
+        });
+        this.stateManager.transition(AudioServiceEvent.ERROR, {
+          error: {
+            code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+            message: error.message,
+            details: error
+          }
+        });
+        throw error;
+      }
 
-      const result: RecordingResult = {
-        id: sessionId,
-        startTime: this.currentSession.startTime,
-        audioData,
-        duration
-      };
+      return new Promise<RecordingResult>((resolve, reject) => {
+        // We know mediaRecorder is not null here because we checked above
+        const mediaRecorder = this.mediaRecorder!;
+        mediaRecorder.onstop = async () => {
+          try {
+            const duration = Date.now() - this.currentSession!.startTime;
+            const blob = new Blob(this.audioChunks, { type: 'audio/webm' });
+            this.currentSession!.audioData = new Float32Array(await blob.arrayBuffer());
 
-      this.currentSession = null;
-      return result;
+            this.audioChunks = [];
+            const stateData: Partial<AudioServiceStateData> = {
+              context: {
+                ...this.stateManager.getState().context,
+                isContextRunning: this.audioContext?.state === 'running'
+              }
+            };
+
+            // Only transition back to READY state if we're still in RECORDING state
+            const stateBeforeTransition = this.stateManager.getState().state;
+            if (stateBeforeTransition === AudioServiceState.RECORDING) {
+              this.stateManager.transition(AudioServiceEvent.RECORDING_STOP, stateData);
+            }
+            this.currentSession = null;
+
+            resolve({
+              audioData: new Float32Array(await blob.arrayBuffer()),
+              duration,
+              hasVoice: true,
+              metrics: {
+                averageAmplitude: 0,
+                peakAmplitude: 0,
+                silenceRatio: 0,
+                processingTime: 0
+              }
+            });
+          } catch (error) {
+            this.stateManager.transition(AudioServiceEvent.ERROR, {
+              error: {
+                code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+                message: error instanceof Error ? error.message : String(error),
+                details: error
+              }
+            });
+            reject(error);
+          }
+        };
+
+        mediaRecorder.stop();
+      });
     } catch (error) {
-      const errorDetails: AudioErrorDetails = {
-        name: 'Recording Stop',
-        code: AudioServiceError.RECORDING_FAILED,
-        category: AudioErrorCategory.RECORDING,
-        message: error instanceof Error ? error.message : 'Failed to stop recording',
-        retryable: true
-      };
-      this.stateManager.transition(AudioServiceEvent.ERROR, { error: errorDetails });
+      this.stateManager.transition(AudioServiceEvent.ERROR, {
+        error: {
+          code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+          message: error instanceof Error ? error.message : String(error),
+          details: error
+        }
+      });
       throw error;
     }
   }
 
-  async processAudioChunk(sessionId: string, chunk: Float32Array): Promise<boolean> {
+  async processAudioChunk(): Promise<boolean> {
     try {
       const vadService = this.vadService;
       if (!vadService) {
         return false;
       }
 
-      return new Promise<boolean>(async (resolve) => {
+      return new Promise<boolean>((resolve) => {
         const removeListener = vadService.addStateListener((state) => {
           removeListener();
-          resolve(state.speaking);
+          resolve(state.speaking || false);
         });
 
-        await vadService.start();
+        vadService.start().catch((error) => {
+          console.error('VAD processing failed:', error);
+          resolve(false);
+        });
       });
     } catch (error) {
       const errorDetails: AudioErrorDetails = {
-        name: 'Audio Processing',
         code: AudioServiceError.PROCESSING_FAILED,
         category: AudioErrorCategory.PROCESSING,
         message: error instanceof Error ? error.message : 'Failed to process audio chunk',
@@ -343,7 +542,7 @@ export class AudioServiceImpl implements AudioService {
     }
   }
 
-  async generateSpeech(params: TTSParams): Promise<Float32Array> {
+  async generateSpeech(): Promise<Float32Array> {
     try {
       // Mock implementation - replace with actual TTS service
       const audioData = new Float32Array(1024).fill(0);
@@ -407,7 +606,12 @@ export class AudioServiceImpl implements AudioService {
 
       this.audioChunks = [];
       this.currentSession = null;
-      this.stateManager.transition(AudioServiceEvent.CLEANUP);
+
+      // Only transition to UNINITIALIZED if we're not already there
+      const currentState = this.stateManager.getState().state;
+      if (currentState !== AudioServiceState.UNINITIALIZED) {
+        this.stateManager.transition(AudioServiceEvent.CLEANUP);
+      }
     } catch (error) {
       console.error('Cleanup failed:', error);
       this.stateManager.transition(AudioServiceEvent.ERROR, {
@@ -420,7 +624,7 @@ export class AudioServiceImpl implements AudioService {
     }
   }
 
-  getState(): AudioServiceStateData {
+  getState(): ServiceState<AudioServiceContext> {
     return this.stateManager.getState();
   }
 
@@ -435,7 +639,10 @@ export class AudioServiceImpl implements AudioService {
       });
 
       if (!result.ok) {
-        throw new ServiceError('TRANSCRIPTION_FAILED', 'Transcription request failed');
+        this.handleError(
+          new Error('Transcription request failed'),
+          ScriptAnalysisErrorCode.PROCESSING_FAILED
+        );
       }
 
       const data = await result.json();
@@ -444,7 +651,11 @@ export class AudioServiceImpl implements AudioService {
         confidence: data.confidence
       };
     } catch (error) {
-      throw new ServiceError('TRANSCRIPTION_FAILED', error instanceof Error ? error.message : 'Failed to transcribe audio');
+      this.handleError(
+        error,
+        ScriptAnalysisErrorCode.PROCESSING_FAILED
+      );
+      throw error;
     }
   }
 
@@ -459,7 +670,10 @@ export class AudioServiceImpl implements AudioService {
       });
 
       if (!result.ok) {
-        throw new ServiceError('EMOTION_DETECTION_FAILED', 'Emotion detection request failed');
+        this.handleError(
+          new Error('Emotion detection request failed'),
+          ScriptAnalysisErrorCode.PROCESSING_FAILED
+        );
       }
 
       const data = await result.json();
@@ -468,8 +682,53 @@ export class AudioServiceImpl implements AudioService {
         confidence: data.confidence
       };
     } catch (error) {
-      throw new ServiceError('EMOTION_DETECTION_FAILED', error instanceof Error ? error.message : 'Failed to detect emotion');
+      this.handleError(
+        error,
+        ScriptAnalysisErrorCode.PROCESSING_FAILED
+      );
+      throw error;
     }
+  }
+
+  addStateListener(listener: (state: ServiceState<AudioServiceContext>) => void): () => void {
+    this.listeners.push(listener);
+    return () => this.removeStateListener(listener);
+  }
+
+  removeStateListener(listener: (state: ServiceState<AudioServiceContext>) => void): void {
+    const index = this.listeners.indexOf(listener);
+    if (index !== -1) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  protected setState(newState: Partial<ServiceState<AudioServiceContext>>): void {
+    this.state = { ...this.state, ...newState } as AudioServiceStateData;
+    this.listeners.forEach(listener => listener(this.state));
+  }
+
+  private handleError(error: unknown, code: ScriptAnalysisErrorCode): never {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const scriptError = new ScriptAnalysisError({
+      code,
+      message: errorMessage,
+      originalError: error instanceof Error ? error : undefined
+    });
+
+    // Only transition to ERROR state if we're not already in it
+    const currentState = this.stateManager.getState().state;
+    if (currentState !== AudioServiceState.ERROR) {
+      const stateData: Partial<AudioServiceStateData> = {
+        error: {
+          code,
+          message: errorMessage,
+          details: error
+        }
+      };
+      this.stateManager.transition(AudioServiceEvent.ERROR, stateData);
+    }
+
+    throw scriptError;
   }
 }
 

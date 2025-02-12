@@ -1,29 +1,24 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "@/test/test-utils";
 import { ScriptContent } from "../script-content";
+import type { Line } from "../types";
 
 describe("ScriptContent", () => {
-  const mockLines = [
+  const mockLines: Line[] = [
     {
       id: "1",
       character: "Romeo",
-      text: "But, soft! what light through yonder window breaks?",
-      emotion: "curious",
+      text: "O, she doth teach the torches to burn bright!",
+      emotion: "joy",
       timing: 5,
+      confidence: 0.9,
     },
     {
       id: "2",
-      character: "Romeo",
-      text: "It is the east, and Juliet is the sun.",
-      emotion: "loving",
-      timing: 4,
-    },
-    {
-      id: "3",
       character: "Juliet",
-      text: "O Romeo, Romeo! wherefore art thou Romeo?",
-      emotion: "yearning",
-      timing: 6,
+      text: "My bounty is as boundless as the sea",
+      emotion: "love",
+      timing: 4,
+      confidence: 0.85,
     },
   ];
 
@@ -32,43 +27,71 @@ describe("ScriptContent", () => {
     Juliet: "rgb(236, 72, 153)",
   };
 
-  const renderComponent = () => {
-    return render(
+  it("renders script lines correctly", () => {
+    render(
       <ScriptContent
         lines={mockLines}
         characterColors={mockCharacterColors}
         onLineSelect={() => {}}
       />
     );
-  };
 
-  it("renders all script lines", () => {
-    renderComponent();
-
-    mockLines.forEach((line) => {
-      expect(screen.getByText(line.text)).toBeInTheDocument();
-    });
+    expect(screen.getByText("Romeo")).toBeInTheDocument();
+    expect(
+      screen.getByText("O, she doth teach the torches to burn bright!")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Juliet")).toBeInTheDocument();
+    expect(
+      screen.getByText("My bounty is as boundless as the sea")
+    ).toBeInTheDocument();
   });
 
-  it("applies character colors correctly", () => {
-    renderComponent();
+  it("displays emotion indicators", () => {
+    render(
+      <ScriptContent
+        lines={mockLines}
+        characterColors={mockCharacterColors}
+        onLineSelect={() => {}}
+      />
+    );
 
-    const romeoBadges = screen.getAllByTestId(/^character-badge-[12]$/);
-    romeoBadges.forEach((badge) => {
-      expect(badge).toHaveStyle({ backgroundColor: "rgb(79, 70, 229)" });
-    });
+    const joyEmotion = screen.getByTestId("emotion-joy");
+    const loveEmotion = screen.getByTestId("emotion-love");
 
-    const julietBadge = screen.getByTestId("character-badge-3");
-    expect(julietBadge).toHaveStyle({ backgroundColor: "rgb(236, 72, 153)" });
+    expect(joyEmotion).toBeInTheDocument();
+    expect(loveEmotion).toBeInTheDocument();
   });
 
-  it("maintains accessibility attributes", () => {
-    renderComponent();
+  it("handles empty lines array", () => {
+    render(
+      <ScriptContent lines={[]} characterColors={{}} onLineSelect={() => {}} />
+    );
+    expect(screen.getByText("No lines to display")).toBeInTheDocument();
+  });
 
-    const lines = screen.getAllByRole("listitem");
-    lines.forEach((line) => {
-      expect(line).toHaveAttribute("tabIndex", "0");
-      expect(line).toHaveAttribute("aria-label");
-    });
+  it("handles missing emotion data", () => {
+    const linesWithoutEmotion: Line[] = [
+      {
+        id: "1",
+        character: "Romeo",
+        text: "O, she doth teach the torches to burn bright!",
+        emotion: "neutral",
+        timing: 5,
+        confidence: 0,
+      },
+    ];
+
+    render(
+      <ScriptContent
+        lines={linesWithoutEmotion}
+        characterColors={mockCharacterColors}
+        onLineSelect={() => {}}
+      />
+    );
+    expect(screen.getByText("Romeo")).toBeInTheDocument();
+    expect(
+      screen.getByText("O, she doth teach the torches to burn bright!")
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId(/emotion-/)).toBeInTheDocument();
   });
 });

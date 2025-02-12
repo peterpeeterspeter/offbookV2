@@ -4,7 +4,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Clock } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 export interface Scene {
   id: string;
@@ -53,11 +53,11 @@ export function SceneNavigation({
         type="button"
         aria-pressed={isSelected}
         data-testid={`scene-button-${scene.number}`}
-        aria-label={`Scene ${scene.number}${duration ? ` - ${duration}` : ""}`}
+        aria-label={`${scene.title || `Scene ${scene.number}`}${duration ? ` - ${duration}` : ""}`}
         tabIndex={0}
         role="button"
       >
-        <span>Scene {scene.number}</span>
+        <span>{scene.title || `Scene ${scene.number}`}</span>
         {duration && (
           <span className="ml-auto flex items-center text-xs text-muted-foreground">
             <Clock className="mr-1 h-3 w-3" aria-hidden="true" />
@@ -99,7 +99,16 @@ export function SceneNavigation({
           aria-labelledby="scenes-heading"
           className="space-y-2"
         >
-          {scenes.map((scene) => renderSceneButton(scene))}
+          {scenes.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm"
+              data-testid="no-scenes-message"
+            >
+              No scenes available
+            </p>
+          ) : (
+            scenes.map((scene) => renderSceneButton(scene))
+          )}
         </nav>
       </div>
     </ScrollArea>

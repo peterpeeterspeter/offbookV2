@@ -1,6 +1,9 @@
 // Learn more: https://github.com/testing-library/jest-dom
 import '@testing-library/jest-dom';
 
+// Add fetch polyfill for tests
+import 'whatwg-fetch';
+
 // Mock environment variables
 process.env = {
   ...process.env,
@@ -10,6 +13,12 @@ process.env = {
   ELEVENLABS_API_KEY: 'test-elevenlabs-key',
   DEEPSEEK_API_KEY: 'test-deepseek-key',
   NODE_ENV: 'test',
+  WHISPER_API_ENDPOINT: 'https://api.whisper.ai/v1/transcribe',
+  ELEVENLABS_API_ENDPOINT: 'https://api.elevenlabs.ai/v1',
+  EMOTION_API_ENDPOINT: 'https://api.emotion.ai/v1/detect',
+  WHISPER_API_KEY: 'test_whisper_key',
+  ELEVENLABS_API_KEY: 'test_elevenlabs_key',
+  EMOTION_API_KEY: 'test_emotion_key'
 };
 
 // Add fetch polyfill
@@ -81,4 +90,91 @@ global.TextEncoder = TextEncoder;
 global.TextDecoder = TextDecoder;
 
 // Mock Streams API
-global.structuredClone = (obj) => JSON.parse(JSON.stringify(obj)); 
+global.structuredClone = (obj) => JSON.parse(JSON.stringify(obj));
+
+// Mock the AudioContext and related Web Audio API features
+class MockAudioContext {
+  constructor() {
+    this.state = 'running';
+    this.destination = {};
+    this.sampleRate = 44100;
+  }
+
+  createMediaStreamSource() {
+    return { connect: jest.fn() };
+  }
+
+  createAnalyser() {
+    return {
+      connect: jest.fn(),
+      disconnect: jest.fn(),
+      fftSize: 2048,
+      frequencyBinCount: 1024,
+      getByteFrequencyData: jest.fn(),
+      getFloatTimeDomainData: jest.fn()
+    };
+  }
+
+  close() {
+    this.state = 'closed';
+    return Promise.resolve();
+  }
+}
+
+class MockMediaRecorder {
+  constructor() {
+    this.state = 'inactive';
+    this.ondataavailable = jest.fn();
+    this.onstop = jest.fn();
+  }
+
+  start() {
+    this.state = 'recording';
+  }
+
+  stop() {
+    this.state = 'inactive';
+    this.onstop && this.onstop();
+  }
+}
+
+// Mock the global objects
+global.AudioContext = MockAudioContext;
+global.webkitAudioContext = MockAudioContext;
+global.MediaRecorder = MockMediaRecorder;
+
+// Mock the navigator.mediaDevices
+Object.defineProperty(global.navigator, 'mediaDevices', {
+  value: {
+    getUserMedia: jest.fn().mockImplementation(() =>
+      Promise.resolve({
+        getTracks: () => [{
+          stop: jest.fn()
+        }]
+      })
+    )
+  }
+});
+
+// Mock fetch responses
+global.fetch = jest.fn().mockImplementation((url) => {
+  if (url.includes('whisper')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ text: 'Mocked transcription', confidence: 0.95 })
+    });
+  }
+  if (url.includes('elevenlabs')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ audio: new ArrayBuffer(1024) })
+    });
+  }
+  if (url.includes('emotion')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ type: 'happy', confidence: 0.85 })
+    });
+  }
+  return Promise.reject(new Error('Not found'));
+});

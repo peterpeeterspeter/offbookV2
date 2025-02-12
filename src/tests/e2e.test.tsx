@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, waitFor } from "./test-utils";
+import { render, screen, waitFor } from "./test-utils";
 import userEvent from "@testing-library/user-event";
 import ScriptUpload from "@/components/ScriptUpload";
 import SceneFlow from "@/components/SceneFlow";
@@ -7,12 +7,6 @@ import { ScriptDetailPageClient } from "@/app/scripts/[id]/page.client";
 import React from "react";
 
 interface SceneAnalysisParams {
-  shouldError?: boolean;
-}
-
-interface SceneFlowProps {
-  scriptId: string;
-  userRole: string;
   shouldError?: boolean;
 }
 
@@ -106,11 +100,47 @@ vi.mock("@/services/scene-flow", () => {
   };
 });
 
-vi.mock("@/services/audio-service", () => ({
-  startRecording: vi.fn(),
-  stopRecording: vi.fn().mockResolvedValue(new Blob()),
-  playAudio: vi.fn(),
-}));
+vi.mock("@/services/audio-service", () => {
+  const mockState = {
+    state: "READY",
+    context: {
+      sampleRate: 44100,
+      channelCount: 2,
+      vadBufferSize: 2048,
+      noiseThreshold: 0.2,
+      silenceThreshold: 0.1,
+      isContextRunning: true,
+      vadEnabled: true,
+      vadThreshold: 0.5,
+      vadSampleRate: 16000,
+    },
+    error: null,
+  };
+
+  return {
+    AudioService: {
+      setup: vi.fn().mockResolvedValue(undefined),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+      startRecording: vi.fn().mockResolvedValue(undefined),
+      stopRecording: vi.fn().mockResolvedValue({
+        audioData: new Float32Array(1024),
+        duration: 1000,
+        hasVoice: true,
+        metrics: {
+          averageAmplitude: 0.5,
+          peakAmplitude: 0.8,
+          silenceRatio: 0.1,
+          processingTime: 100,
+        },
+      }),
+      processAudioChunk: vi.fn().mockResolvedValue(true),
+      initializeTTS: vi.fn().mockResolvedValue(undefined),
+      getState: vi.fn().mockReturnValue(mockState),
+      addStateListener: vi.fn().mockReturnValue(() => {}),
+      removeStateListener: vi.fn(),
+    },
+  };
+});
 
 vi.mock("@/services/script-analysis", () => ({
   analyzeScript: vi.fn().mockResolvedValue({
@@ -135,6 +165,79 @@ vi.mock("@/app/scripts/[id]/page.client", () => ({
     <div data-testid="script-detail">
       <h1 data-testid="script-title">Test Script</h1>
     </div>
+  ),
+}));
+
+vi.mock("@/lib/utils", () => ({
+  cn: (...args: unknown[]) => args.filter(Boolean).join(" "),
+}));
+
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, ...props }: { children: React.ReactNode }) => (
+    <button {...props}>{children}</button>
+  ),
+}));
+
+vi.mock("@/components/ui/card", () => ({
+  Card: ({ children, ...props }: { children: React.ReactNode }) => (
+    <div {...props}>{children}</div>
+  ),
+}));
+
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, ...props }: { children: React.ReactNode }) => (
+    <div {...props}>{children}</div>
+  ),
+}));
+
+vi.mock("@/components/ui/switch", () => ({
+  Switch: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+  }) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onCheckedChange(e.target.checked)}
+      {...props}
+    />
+  ),
+}));
+
+vi.mock("@/components/ui/label", () => ({
+  Label: ({ children, ...props }: { children: React.ReactNode }) => (
+    <label {...props}>{children}</label>
+  ),
+}));
+
+vi.mock("@/components/ui/separator", () => ({
+  Separator: () => <hr />,
+}));
+
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
+    open ? <div role="dialog">{children}</div> : null,
+  DialogContent: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogHeader: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogTitle: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DialogDescription: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+}));
+
+vi.mock("@/components/error-boundaries/AudioErrorBoundary", () => ({
+  AudioErrorBoundary: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
   ),
 }));
 

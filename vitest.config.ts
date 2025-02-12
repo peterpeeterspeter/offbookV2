@@ -4,17 +4,24 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react() as any],
   test: {
     environment: 'jsdom',
-    globals: true,
     setupFiles: ['./src/tests/setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
+    include: ['**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    exclude: ['node_modules', 'dist', '.next', 'coverage', 'backups', 'pipecat-main'],
+    globals: true,
     coverage: {
+      provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
-        'src/tests/setup.ts',
+        'src/test/',
+        '**/*.d.ts',
+        '**/*.test.{js,jsx,ts,tsx}',
+        '**/*.spec.{js,jsx,ts,tsx}',
+        '**/types.ts',
+        'coverage/**',
       ],
     },
   },

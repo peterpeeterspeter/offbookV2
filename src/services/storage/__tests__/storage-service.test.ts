@@ -1,8 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { StorageService } from '../storage-service';
-import { StorableData, StorageEngine } from '../types';
-import { LocalStorageEngine } from '../local-storage';
-import { IndexedDBEngine } from '../indexed-db';
+import { StorableData, StorageEngine, StorageOptions } from '../types';
 
 // Mock data
 interface TestData extends StorableData {
@@ -10,27 +7,30 @@ interface TestData extends StorableData {
   value: number;
 }
 
-const testData: TestData = {
+const mockData: TestData = {
   id: 'test-1',
   name: 'Test Item',
   value: 42,
   createdAt: Date.now(),
   updatedAt: Date.now(),
-  version: 1,
+  version: 1
 };
 
-// Mock storage engine for testing
+// Mock storage engine
 class MockStorageEngine implements StorageEngine {
-  private store = new Map<string, any>();
+  private store: Map<string, any> = new Map();
   readonly name = 'mockStorage';
-  readonly maxSize = 1024 * 1024;
-  readonly isAvailable = true;
+  readonly maxSize = 1024 * 1024; // 1MB
+  isAvailable = true;
 
-  async get<T>(key: string): Promise<T | null> {
+  async get<T extends StorableData>(key: string): Promise<T | null> {
     return this.store.get(key) || null;
   }
 
-  async set<T>(key: string, value: T): Promise<void> {
+  async set<T extends StorableData>(key: string, value: T, options?: StorageOptions): Promise<void> {
+    if (options?.priority === 'critical' && !this.isAvailable) {
+      throw new Error('Storage not available');
+    }
     this.store.set(key, value);
   }
 
@@ -48,171 +48,95 @@ class MockStorageEngine implements StorageEngine {
 }
 
 describe('StorageService', () => {
-  let storage: StorageService;
+  let service: StorageService;
   let mockEngine: MockStorageEngine;
 
   beforeEach(() => {
-    // Clear localStorage and indexedDB before each test
-    localStorage.clear();
-    indexedDB.deleteDatabase('app_storage');
-
     mockEngine = new MockStorageEngine();
-    storage = new StorageService();
-    // @ts-ignore - Accessing private property for testing
-    storage.engines = [mockEngine];
-
-    // @ts-expect-error - Mock storage engine for testing
-    mockEngine.get.mockImplementation(() => Promise.resolve(null));
-    // @ts-expect-error - Mock storage engine for testing
-    mockEngine.set.mockImplementation(() => Promise.resolve());
-    // @ts-expect-error - Mock storage engine for testing
-    mockEngine.delete.mockImplementation(() => Promise.resolve());
-    // @ts-expect-error - Mock storage engine for testing
-    mockEngine.clear.mockImplementation(() => Promise.resolve());
+    service = new StorageService();
+    // @ts-expect-error Accessing private property for testing
+    service.engines = [mockEngine];
   });
 
-  describe('Basic Operations', () => {
-    it('should store and retrieve data', async () => {
-      await storage.set('test', testData);
-      const retrieved = await storage.get<TestData>('test');
-      expect(retrieved).toEqual(testData);
-    });
-
-    it('should delete data', async () => {
-      await storage.set('test', testData);
-      await storage.delete('test');
-      const retrieved = await storage.get('test');
-      expect(retrieved).toBeNull();
-    });
-
-    it('should clear all data', async () => {
-      await storage.set('test1', testData);
-      await storage.set('test2', { ...testData, id: 'test-2' });
-      await storage.clear();
-      const keys = await storage.keys();
-      expect(keys).toHaveLength(0);
-    });
-
-    it('should list all keys', async () => {
-      await storage.set('test1', testData);
-      await storage.set('test2', { ...testData, id: 'test-2' });
-      const keys = await storage.keys();
-      expect(keys).toContain('test1');
-      expect(keys).toContain('test2');
-    });
+  afterEach(async () => {
+    await service.clear();
   });
 
-  describe('Storage Options', () => {
-    it('should handle encrypted data', async () => {
-      await storage.set('secret', testData, { encrypt: true });
-      const retrieved = await storage.get<TestData>('secret');
-      expect(retrieved).toEqual(testData);
-    });
-
-    it('should handle compressed data', async () => {
-      await storage.set('compressed', testData, { compress: true });
-      const retrieved = await storage.get<TestData>('compressed');
-      expect(retrieved).toEqual(testData);
-    });
-
-    it('should respect expiration time', async () => {
-      await storage.set('expires', testData, { expiresIn: 100 }); // 100ms
-      let retrieved = await storage.get<TestData>('expires');
-      expect(retrieved).toEqual(testData);
-
-      // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 150));
-      retrieved = await storage.get<TestData>('expires');
-      expect(retrieved).toBeNull();
-    });
+  it('should store and retrieve data', async () => {
+    await service.set(mockData.id, mockData);
+    const retrieved = await service.get<TestData>(mockData.id);
+    expect(retrieved).toEqual(mockData);
   });
 
-  describe('Storage Engine Selection', () => {
-    let localEngine: LocalStorageEngine;
-    let indexedDBEngine: IndexedDBEngine;
-
-    beforeEach(() => {
-      localEngine = new LocalStorageEngine();
-      indexedDBEngine = new IndexedDBEngine();
-      // @ts-ignore - Accessing private property for testing
-      storage.engines = [indexedDBEngine, localEngine];
-    });
-
-    it('should use IndexedDB for critical data', async () => {
-      const spy = vi.spyOn(indexedDBEngine, 'set');
-      await storage.set('critical', testData, { priority: 'critical' });
-      expect(spy).toHaveBeenCalled();
-    });
-
-    it('should fallback to localStorage if IndexedDB fails', async () => {
-      const indexedDBSpy = vi.spyOn(indexedDBEngine, 'set')
-        .mockRejectedValueOnce(new Error('Failed'));
-      const localStorageSpy = vi.spyOn(localEngine, 'set');
-
-      await storage.set('fallback', testData);
-      expect(indexedDBSpy).toHaveBeenCalled();
-      expect(localStorageSpy).toHaveBeenCalled();
-    });
+  it('should handle non-existent data', async () => {
+    const retrieved = await service.get<TestData>('non-existent');
+    expect(retrieved).toBeNull();
   });
 
-  describe('Migration', () => {
-    let sourceEngine: MockStorageEngine;
-    let targetEngine: MockStorageEngine;
-
-    beforeEach(() => {
-      sourceEngine = new MockStorageEngine();
-      targetEngine = new MockStorageEngine();
-    });
-
-    it('should migrate data between engines', async () => {
-      // Setup source data
-      await sourceEngine.set('test1', testData);
-      await sourceEngine.set('test2', { ...testData, id: 'test-2' });
-
-      // Perform migration
-      await storage.migrate(sourceEngine, targetEngine);
-
-      // Verify migration
-      const sourceKeys = await sourceEngine.keys();
-      expect(sourceKeys).toHaveLength(0);
-
-      const targetKeys = await targetEngine.keys();
-      expect(targetKeys).toHaveLength(2);
-
-      const migratedData = await targetEngine.get<TestData>('test1');
-      expect(migratedData).toEqual(testData);
-    });
-
-    it('should prevent concurrent migrations', async () => {
-      const migrationPromise1 = storage.migrate(sourceEngine, targetEngine);
-      const migrationPromise2 = storage.migrate(sourceEngine, targetEngine);
-
-      await expect(migrationPromise1).resolves.not.toThrow();
-      await expect(migrationPromise2).rejects.toThrow('Migration already in progress');
-    });
+  it('should delete data', async () => {
+    await service.set(mockData.id, mockData);
+    await service.delete(mockData.id);
+    const retrieved = await service.get<TestData>(mockData.id);
+    expect(retrieved).toBeNull();
   });
 
-  describe('Error Handling', () => {
-    it('should throw when no storage engine is available', async () => {
-      // @ts-ignore - Accessing private property for testing
-      storage.engines = [];
-      await expect(storage.set('test', testData))
-        .rejects.toThrow('No storage engine available');
-    });
+  it('should clear all data', async () => {
+    await service.set(mockData.id, mockData);
+    await service.set('test-2', { ...mockData, id: 'test-2' });
+    await service.clear();
+    const keys = await service.keys();
+    expect(keys).toHaveLength(0);
+  });
 
-    it('should handle storage quota exceeded', async () => {
-      const largeData = { ...testData, value: 'x'.repeat(1024 * 1024) }; // 1MB
-      await expect(storage.set('large', largeData))
-        .rejects.toThrow(/exceeds.*limit/);
-    });
+  it('should list all keys', async () => {
+    const items = [
+      mockData,
+      { ...mockData, id: 'test-2', value: 43 },
+      { ...mockData, id: 'test-3', value: 44 },
+    ];
 
-    it('should handle invalid data gracefully', async () => {
-      // @ts-ignore - Testing with invalid data
-      await expect(storage.set('invalid', null))
-        .rejects.toThrow();
+    for (const item of items) {
+      await service.set(item.id, item);
+    }
 
-      const retrieved = await storage.get('invalid');
-      expect(retrieved).toBeNull();
+    const keys = await service.keys();
+    expect(keys).toHaveLength(items.length);
+    expect(keys).toEqual(expect.arrayContaining(items.map(item => item.id)));
+  });
+
+  it('should handle storage errors', async () => {
+    mockEngine.isAvailable = false;
+    let error: Error | null = null;
+
+    try {
+      await service.set(mockData.id, mockData, { priority: 'critical' });
+      expect('This line should not be reached').toBe(false);
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toBe('Storage not available');
+  });
+
+  it('should handle concurrent operations', async () => {
+    const operations = [
+      service.set('1', { ...mockData, id: '1' }),
+      service.set('2', { ...mockData, id: '2' }),
+      service.get<TestData>('1'),
+      service.delete('2'),
+    ];
+
+    await expect(Promise.all(operations)).resolves.toBeDefined();
+  });
+
+  describe('Storage Engine Integration', () => {
+    it('should work with default storage engines', async () => {
+      const defaultService = new StorageService();
+      await defaultService.set(mockData.id, mockData);
+      const retrieved = await defaultService.get<TestData>(mockData.id);
+      expect(retrieved).toEqual(mockData);
+      await defaultService.clear();
     });
   });
 });

@@ -5,19 +5,17 @@ export interface Service {
 }
 
 // Error handling
-export interface ServiceError extends Error {
+export interface ServiceError {
   code: string;
-  category: string;
-  details?: Record<string, unknown>;
-  retryable: boolean;
+  message: string;
+  details?: unknown;
 }
 
 // State management
 export interface ServiceState<T> {
-  status: 'uninitialized' | 'initializing' | 'ready' | 'error';
-  data?: T;
+  state: string;
   error?: ServiceError;
-  timestamp: number;
+  context: T;
 }
 
 // Configuration
@@ -106,6 +104,18 @@ export interface ServiceLifecycle {
 
 // Dependency injection
 export interface ServiceContainer {
-  register<T>(token: symbol, implementation: new (...args: any[]) => T): void;
+  register<T>(token: symbol, implementation: T): void;
   resolve<T>(token: symbol): T;
+}
+
+export interface BaseService<T> {
+  getState(): ServiceState<T>;
+  addStateListener(listener: (state: ServiceState<T>) => void): () => void;
+  removeStateListener(listener: (state: ServiceState<T>) => void): void;
+}
+
+export interface ServiceContext {
+  id: string;
+  type: string;
+  config?: Record<string, unknown>;
 }

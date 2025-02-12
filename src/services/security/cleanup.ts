@@ -98,134 +98,43 @@ export class DataCleanupService {
         if (task.policy.archive) {
           await this.archiveData(task.resourceId);
         } else {
-          await this.secureDelete(task.resourceId);
+          await this.deleteData(task.resourceId);
         }
       } catch (error) {
-        console.error(`Failed to cleanup ${task.resourceId}:`, error);
-        // Reschedule failed task with exponential backoff
+        // Reschedule failed tasks with exponential backoff
         this.rescheduleFailedTask(task);
       }
     }
   }
 
   /**
-   * Performs secure deletion of data
-   */
-  private async secureDelete(resourceId: string): Promise<void> {
-    const maxRetries = 3;
-    let retryCount = 0;
-    let lastError: Error | null = null;
-
-    while (retryCount < maxRetries) {
-      try {
-        // First overwrite with random data
-        await this.overwriteWithRandom(resourceId);
-
-        // Verify overwrite was successful
-        if (!await this.verifyOverwrite(resourceId)) {
-          throw new Error('Failed to verify data overwrite');
-        }
-
-        // Then delete
-        await this.deleteData(resourceId);
-
-        // Verify deletion
-        if (await this.resourceExists(resourceId)) {
-          throw new Error('Failed to verify deletion');
-        }
-
-        return; // Success
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error('Unknown error');
-        retryCount++;
-
-        if (retryCount < maxRetries) {
-          // Exponential backoff
-          await new Promise(resolve =>
-            setTimeout(resolve, Math.pow(2, retryCount) * 1000)
-          );
-        }
-      }
-    }
-
-    throw new Error(
-      `Secure deletion failed after ${maxRetries} attempts: ${lastError?.message}`
-    );
-  }
-
-  /**
-   * Verifies that data was properly overwritten
-   */
-  private async verifyOverwrite(resourceId: string): Promise<boolean> {
-    try {
-      // In a real implementation, this would:
-      // 1. Read the data
-      // 2. Verify it's been overwritten with random data
-      // 3. Return true if verification succeeds
-
-      // For now, we'll simulate the verification
-      await new Promise(resolve => setTimeout(resolve, 50));
-      return true;
-    } catch (error) {
-      console.error('Overwrite verification failed:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Checks if a resource still exists
-   */
-  private async resourceExists(resourceId: string): Promise<boolean> {
-    try {
-      // In a real implementation, this would check if the resource
-      // can still be accessed after deletion
-
-      // For now, we'll simulate the check
-      await new Promise(resolve => setTimeout(resolve, 50));
-      return false;
-    } catch (error) {
-      console.error('Resource existence check failed:', error);
-      return true; // Assume it exists if we can't verify
-    }
-  }
-
-  /**
-   * Overwrites data with random content before deletion
-   */
-  private async overwriteWithRandom(resourceId: string): Promise<void> {
-    // In a real implementation, this would:
-    // 1. Get the size of the data
-    // 2. Generate random data of the same size
-    // 3. Overwrite the original data multiple times
-    // 4. Ensure the writes are synced to disk
-
-    // For now, we'll just simulate the process
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-
-  /**
-   * Reschedules a failed cleanup task
+   * Reschedules a failed task with exponential backoff
    */
   private rescheduleFailedTask(task: CleanupTask): void {
     const retryCount = this.getRetryCount(task);
-    if (retryCount >= 3) return; // Give up after 3 retries
+    if (retryCount >= 3) {
+      // Log error and stop retrying after 3 attempts
+      console.error(`Failed to cleanup resource ${task.resourceId} after ${retryCount} attempts`);
+      return;
+    }
 
-    const backoffMs = Math.pow(2, retryCount) * 60000; // Exponential backoff
+    const backoffMs = Math.pow(2, retryCount) * 1000; // Exponential backoff
+    const newTaskId = `${task.id}_retry${retryCount + 1}`;
     const newTask: CleanupTask = {
       ...task,
-      id: `${task.id}_retry${retryCount + 1}`,
+      id: newTaskId,
       scheduledTime: Date.now() + backoffMs
     };
 
-    this.tasks.set(newTask.id, newTask);
+    this.tasks.set(newTaskId, newTask);
   }
 
   /**
-   * Gets the retry count for a task
+   * Gets the retry count from a task ID
    */
   private getRetryCount(task: CleanupTask): number {
-    const matches = task.id.match(/_retry(\d+)$/);
-    return matches ? parseInt(matches[1], 10) : 0;
+    const match = task.id.match(/_retry(\d+)$/);
+    return match && match[1] ? parseInt(match[1], 10) : 0;
   }
 
   /**
@@ -241,7 +150,7 @@ export class DataCleanupService {
   async forceCleanup(resourceId: string): Promise<void> {
     for (const task of this.tasks.values()) {
       if (task.resourceId === resourceId) {
-        await this.secureDelete(resourceId);
+        await this.deleteData(resourceId);
         this.tasks.delete(task.id);
         break;
       }

@@ -1,6 +1,5 @@
-/// <reference types="vitest" />
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { synthesizeSpeech, getStreamingMetrics, resetStreamingMetrics } from '../services/elevenlabs'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { synthesizeSpeech, resetStreamingMetrics } from '../services/elevenlabs'
 import type { Emotion } from '../components/EmotionHighlighter'
 
 // Mock environment variables
@@ -49,15 +48,8 @@ describe('ElevenLabs Service', () => {
         json: async () => ({ detail: 'Server error' })
       })
 
-      let errorThrown = false
-      try {
-        await synthesizeSpeech('Test error')
-      } catch (error) {
-        errorThrown = true
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toContain('Internal Server Error')
-      }
-      expect(errorThrown).toBe(true)
+      await expect(synthesizeSpeech('Test error'))
+        .rejects.toThrow('ElevenLabs API error: Internal Server Error');
     })
   })
 
@@ -94,14 +86,8 @@ describe('ElevenLabs Service', () => {
       const networkError = new Error('Network error')
       mockFetch.mockRejectedValueOnce(networkError)
 
-      let errorThrown = false
-      try {
-        await synthesizeSpeech('Test network error')
-      } catch (error) {
-        errorThrown = true
-        expect(error).toBe(networkError)
-      }
-      expect(errorThrown).toBe(true)
+      await expect(synthesizeSpeech('Test network error'))
+        .rejects.toThrow('Network error')
     })
 
     it('should handle empty response', async () => {
@@ -113,15 +99,8 @@ describe('ElevenLabs Service', () => {
         })
       })
 
-      let errorThrown = false
-      try {
-        await synthesizeSpeech('Test empty response')
-      } catch (error) {
-        errorThrown = true
-        expect(error).toBeInstanceOf(Error)
-        expect((error as Error).message).toBe('No response body received')
-      }
-      expect(errorThrown).toBe(true)
+      await expect(synthesizeSpeech('Test empty response'))
+        .rejects.toThrow('No response body received')
     })
   })
 })

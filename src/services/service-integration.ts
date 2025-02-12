@@ -263,15 +263,20 @@ export class ServiceIntegration {
 
   public async dispatch(event: ServiceEvent, data: unknown): Promise<ServiceMetrics> {
     const startTime = performance.now();
-    let cancelled = false;
 
     try {
-      const handlers = this.eventHandlers.get(event) ?? new Set();
-      for (const handler of handlers) {
-        await handler(data, () => { cancelled = true; });
-        if (cancelled) break;
+      const handlers = this.eventHandlers.get(event);
+      if (handlers) {
+        let cancelled = false;
+        const cancel = () => { cancelled = true; };
+
+        for (const handler of handlers) {
+          if (cancelled) break;
+          await handler(data, cancel);
+        }
       }
 
+      // Update metrics
       this.metrics.processingTime = performance.now() - startTime;
       this.updateResourceMetrics();
 
@@ -306,43 +311,94 @@ export class ServiceIntegration {
     return id;
   }
 
-  public async releaseResource(id: string): Promise<void> {
+  public async acquireResource(id: string, requester: string): Promise<void> {
     const resource = this.resources.get(id);
     if (!resource) {
       throw new ServiceError('RESOURCE_NOT_FOUND', `Resource ${id} not found`);
     }
 
-    resource.usage = 0;
-    resource.locks.clear();
+    if (resource.locks.size > 0 && !resource.locks.has(requester)) {
+      const requesters = Array.from(resource.locks);
+      this.listeners.resourceContention.forEach(cb =>
+        cb({ resource: id, requesters: [...requesters, requester] })
+      );
+      throw new ServiceError('RESOURCE_LOCKED', `Resource ${id} is locked by another service`);
+    }
+
+    resource.locks.add(requester);
+    resource.usage++;
+    this.updateResourceMetrics();
   }
 
-  public getResourceUsage(type: string): number {
-    let totalUsage = 0;
-    for (const resource of this.resources.values()) {
-      if (resource.type === type) {
-        totalUsage += resource.usage;
-      }
+  public async releaseResource(id: string, requester?: string): Promise<void> {
+    const resource = this.resources.get(id);
+    if (!resource) {
+      throw new ServiceError('RESOURCE_NOT_FOUND', `Resource ${id} not found`);
     }
-    return totalUsage;
+
+    if (requester && !resource.locks.has(requester)) {
+      throw new ServiceError('UNAUTHORIZED_RELEASE', `Service ${requester} does not hold lock on resource ${id}`);
+    }
+
+    if (requester) {
+      resource.locks.delete(requester);
+    } else {
+      resource.locks.clear();
+    }
+
+    resource.usage = Math.max(0, resource.usage - 1);
+    this.updateResourceMetrics();
+  }
+
+  private updateResourceMetrics(): void {
+    const resources = Array.from(this.resources.values());
+    const totalUsage = resources.reduce((sum, r) => sum + r.usage, 0);
+    const maxPossibleUsage = resources.length * this.services.size;
+
+    this.metrics.resourceEfficiency = maxPossibleUsage > 0
+      ? totalUsage / maxPossibleUsage
+      : 1;
+
+    this.metrics.memoryUsage = resources.reduce(
+      (sum, r) => sum + (r.data.byteLength * r.usage),
+      0
+    );
   }
 
   private async handleError(event: ServiceEvent, error: unknown): Promise<void> {
-    const serviceError = error instanceof ServiceError ? error :
-      new ServiceError('UNKNOWN_ERROR', error instanceof Error ? error.message : String(error));
-
     const service = this.findAffectedService(event);
-    if (!service) return;
+    const serviceError = error instanceof ServiceError ? error : new ServiceError('UNKNOWN', error?.toString() || 'Unknown error');
 
-    this.listeners.error.forEach(listener => {
-      listener({ service, error: serviceError });
-    });
+    if (service) {
+      const handler = this.errorHandlers.get(service);
+      if (handler) {
+        try {
+          const { retry } = await handler(serviceError);
+          if (retry) {
+            // Attempt recovery
+            this.emit(ServiceEvent.ConfigUpdate, { service, action: 'reset' });
+            this.listeners.recovery.forEach(cb => cb({ service, error: serviceError }));
+            return;
+          }
+        } catch (handlerError) {
+          // Handler failed, propagate original error
+          console.error('Error handler failed:', handlerError);
+        }
+      }
+    }
 
-    const handler = this.errorHandlers.get(service);
-    if (handler) {
-      const { retry } = await handler(serviceError);
-      if (retry) {
-        this.listeners.recovery.forEach(listener => {
-          listener({ service, error: serviceError });
+    // Notify error listeners
+    this.listeners.error.forEach(cb => cb({ service: service || 'unknown', error: serviceError }));
+
+    // Check for cascading effects
+    if (service) {
+      const affectedServices = Array.from(this.services.keys())
+        .filter(s => this.services.get(s)?.dependencies?.includes(service));
+
+      for (const affected of affectedServices) {
+        this.emit(ServiceEvent.ServiceDegraded, {
+          service: affected,
+          cause: serviceError
         });
       }
     }
@@ -361,19 +417,6 @@ export class ServiceIntegration {
       default:
         return undefined;
     }
-  }
-
-  private updateResourceMetrics(): void {
-    let totalUsage = 0;
-    let maxUsage = 0;
-
-    for (const resource of this.resources.values()) {
-      totalUsage += resource.usage;
-      maxUsage = Math.max(maxUsage, resource.usage);
-    }
-
-    this.metrics.resourceEfficiency = maxUsage > 0 ? totalUsage / (maxUsage * this.resources.size) : 1;
-    this.metrics.memoryUsage = totalUsage;
   }
 
   public async getServiceHealth(name: string): Promise<ServiceHealth> {

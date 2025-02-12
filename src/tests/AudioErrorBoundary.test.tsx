@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AudioErrorBoundary } from "@/components/error-boundaries/AudioErrorBoundary";
-import { AudioService } from "@/services/audio-service";
 import {
   AudioServiceError,
   AudioServiceState,
   AudioErrorCategory,
-  type AudioErrorDetails,
   type AudioServiceStateData,
 } from "@/types/audio";
 import React from "react";
@@ -46,19 +44,16 @@ describe("AudioErrorBoundary", () => {
 
   const mockAudioState: AudioServiceStateData = {
     state: AudioServiceState.ERROR,
-    status: "error",
-    timestamp: Date.now(),
+    isContextRunning: false,
+    sampleRate: 44100,
     error: {
-      name: "InitializationError",
       code: AudioServiceError.INITIALIZATION_FAILED,
       message: "Failed to initialize audio",
-      category: AudioErrorCategory.INITIALIZATION,
-      retryable: false,
       details: { originalError: new Error("Test error") },
     },
     context: {
       sampleRate: 44100,
-      channels: 1,
+      channelCount: 1,
       isContextRunning: false,
       vadEnabled: false,
       vadThreshold: 0.5,
@@ -66,12 +61,6 @@ describe("AudioErrorBoundary", () => {
       vadBufferSize: 480,
       noiseThreshold: 0.2,
       silenceThreshold: 0.1,
-    },
-    session: {
-      id: null,
-      startTime: null,
-      duration: null,
-      chunks: 0,
     },
   };
 
@@ -106,15 +95,15 @@ describe("AudioErrorBoundary", () => {
     expect(screen.getByText("Audio Error")).toBeInTheDocument();
   });
 
-  it("should display specific error messages for known errors", () => {
+  it("should display specific error messages for known errors", async () => {
+    const errorMessage = "No audio input device was found";
     mockedAudioService.getState.mockReturnValue({
       ...mockAudioState,
       error: {
         name: "DeviceNotFoundError",
         code: AudioServiceError.DEVICE_NOT_FOUND,
-        message: "No audio input device was found",
+        message: errorMessage,
         category: AudioErrorCategory.DEVICE,
-        retryable: true,
         details: { deviceId: "test-device" },
       },
     });
@@ -125,9 +114,7 @@ describe("AudioErrorBoundary", () => {
       </AudioErrorBoundary>
     );
 
-    expect(
-      screen.getByText("No audio input device was found")
-    ).toBeInTheDocument();
+    expect(await screen.findByText(errorMessage)).toBeInTheDocument();
   });
 
   it("should preserve error context", () => {
@@ -139,7 +126,6 @@ describe("AudioErrorBoundary", () => {
         code: AudioServiceError.DEVICE_IN_USE,
         message: "Device in use",
         category: AudioErrorCategory.DEVICE,
-        retryable: true,
         details: errorDetails,
       },
     });
@@ -154,16 +140,16 @@ describe("AudioErrorBoundary", () => {
     expect(state.error?.details).toEqual(errorDetails);
   });
 
-  it("should handle multiple errors in sequence", () => {
+  it("should handle multiple errors in sequence", async () => {
     // First error
+    const firstErrorMessage = "No audio input device was found";
     mockedAudioService.getState.mockReturnValue({
       ...mockAudioState,
       error: {
         name: "DeviceNotFoundError",
         code: AudioServiceError.DEVICE_NOT_FOUND,
-        message: "No audio input device was found",
+        message: firstErrorMessage,
         category: AudioErrorCategory.DEVICE,
-        retryable: true,
         details: { deviceId: "test-device" },
       },
     });
@@ -174,19 +160,17 @@ describe("AudioErrorBoundary", () => {
       </AudioErrorBoundary>
     );
 
-    expect(
-      screen.getByText("No audio input device was found")
-    ).toBeInTheDocument();
+    expect(await screen.findByText(firstErrorMessage)).toBeInTheDocument();
 
     // Second error
+    const secondErrorMessage = "Permission denied";
     mockedAudioService.getState.mockReturnValue({
       ...mockAudioState,
       error: {
         name: "PermissionDeniedError",
         code: AudioServiceError.PERMISSION_DENIED,
-        message: "Permission denied",
+        message: secondErrorMessage,
         category: AudioErrorCategory.PERMISSION,
-        retryable: true,
         details: { permission: "microphone" },
       },
     });
@@ -197,7 +181,7 @@ describe("AudioErrorBoundary", () => {
       </AudioErrorBoundary>
     );
 
-    expect(screen.getByText("Permission denied")).toBeInTheDocument();
+    expect(await screen.findByText(secondErrorMessage)).toBeInTheDocument();
   });
 
   it("should handle error recovery", () => {
@@ -210,7 +194,6 @@ describe("AudioErrorBoundary", () => {
         code: AudioServiceError.DEVICE_NOT_FOUND,
         message: "No audio input device was found",
         category: AudioErrorCategory.DEVICE,
-        retryable: true,
         details: { deviceId: "test-device" },
       },
     });
@@ -225,7 +208,9 @@ describe("AudioErrorBoundary", () => {
     expect(onReset).toHaveBeenCalled();
   });
 
-  it("should cleanup on unmount", () => {
+  it("should cleanup on unmount", async () => {
+    mockedAudioService.cleanup.mockResolvedValueOnce(undefined);
+
     const { unmount } = render(
       <AudioErrorBoundary>
         <ErrorComponent shouldThrow={true} />
@@ -233,6 +218,6 @@ describe("AudioErrorBoundary", () => {
     );
 
     unmount();
-    expect(mockedAudioService.cleanup).toHaveBeenCalled();
+    await expect(mockedAudioService.cleanup).toHaveBeenCalled();
   });
 });

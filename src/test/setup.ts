@@ -4,6 +4,7 @@ import { cleanup } from '@testing-library/react'
 import * as matchers from '@testing-library/jest-dom/matchers'
 import React, { type ReactElement } from 'react'
 import { TextEncoder, TextDecoder } from 'util'
+import 'whatwg-fetch'
 
 // Extend Vitest's expect method with methods from react-testing-library
 expect.extend(matchers)
@@ -15,20 +16,7 @@ afterEach(() => {
 })
 
 // Mock AudioContext and related classes
-class MockAnalyserNode {
-  getByteFrequencyData = vi.fn()
-  getFloatTimeDomainData = vi.fn()
-  fftSize = 2048
-  frequencyBinCount = 1024
-}
-
-class MockGainNode {
-  gain = { value: 1 }
-  connect = vi.fn()
-  disconnect = vi.fn()
-}
-
-class MockAudioContext {
+class BaseAudioContext {
   state: AudioContextState = 'suspended';
   sampleRate = 44100;
   destination = {};
@@ -48,13 +36,79 @@ class MockAudioContext {
   close = vi.fn().mockResolvedValue(undefined);
 }
 
-// Mock MediaStream and related classes
+class MockAudioContext extends BaseAudioContext {
+  baseLatency = 0;
+  outputLatency = 0;
+
+  createMediaElementSource() {
+    return { connect: vi.fn() };
+  }
+
+  createMediaStreamDestination() {
+    return { stream: new MockMediaStream() };
+  }
+}
+
+// Mock MediaStreamTrack
+class MockMediaStreamTrack implements MediaStreamTrack {
+  enabled = true;
+  id = 'mock-track-id';
+  kind = 'audio';
+  label = 'Mock Track';
+  muted = false;
+  readyState: MediaStreamTrackState = 'live';
+  contentHint = '';
+  isolated = false;
+
+  onended: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
+  onisolationchange: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
+  onmute: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
+  onunmute: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
+
+  applyConstraints(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  clone(): MediaStreamTrack {
+    return new MockMediaStreamTrack();
+  }
+
+  getCapabilities(): MediaTrackCapabilities {
+    return {};
+  }
+
+  getConstraints(): MediaTrackConstraints {
+    return {};
+  }
+
+  getSettings(): MediaTrackSettings {
+    return {};
+  }
+
+  stop(): void {
+    this.readyState = 'ended';
+    if (this.onended) {
+      this.onended.call(this, new Event('ended'));
+    }
+  }
+
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  dispatchEvent(): boolean {
+    return true;
+  }
+}
+
+// Mock MediaStream
 class MockMediaStream {
   private tracks: MediaStreamTrack[] = [];
 
   constructor(tracks?: MediaStreamTrack[]) {
     if (tracks) {
       tracks.forEach(track => this.addTrack(track));
+    } else {
+      // Add a default audio track
+      this.addTrack(new MockMediaStreamTrack());
     }
   }
 
@@ -120,6 +174,8 @@ const mockIndexedDB = {
   deleteDatabase: vi.fn(() => mockIDBRequest)
 }
 
+vi.stubGlobal('indexedDB', mockIndexedDB);
+
 // Mock WebSocket
 class MockWebSocket implements WebSocket {
   static readonly CONNECTING = 0;
@@ -151,7 +207,7 @@ class MockWebSocket implements WebSocket {
     message: []
   };
 
-  constructor(url: string, _protocols?: string | string[]) {
+  constructor(url: string) {
     this.url = url;
     setTimeout(() => {
       this.readyState = MockWebSocket.OPEN;
@@ -199,141 +255,18 @@ class MockWebSocket implements WebSocket {
   }
 }
 
-// Update global mocks
-vi.stubGlobal('MediaStream', function() {
-  return {
-    getTracks: () => [],
-    getAudioTracks: () => [],
-    addTrack: vi.fn(),
-    removeTrack: vi.fn()
-  }
-})
-
-vi.stubGlobal('AudioContext', MockAudioContext)
-vi.stubGlobal('webkitAudioContext', MockAudioContext)
-vi.stubGlobal('WebSocket', MockWebSocket)
-
-// Mock window APIs
-vi.stubGlobal('indexedDB', mockIndexedDB)
-
-// Mock window.matchMedia
-vi.stubGlobal('matchMedia', vi.fn().mockImplementation(query => ({
-  matches: false,
-  media: query,
-  onchange: null,
-  addListener: vi.fn(),
-  removeListener: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  dispatchEvent: vi.fn(),
-})))
-
-// Mock IntersectionObserver
-class MockIntersectionObserver {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-}
-
-vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
-
-// Mock ResizeObserver
-class MockResizeObserver {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-}
-
-vi.stubGlobal('ResizeObserver', MockResizeObserver)
-
-// Mock localStorage
-const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  clear: vi.fn(),
-  removeItem: vi.fn(),
-  length: 0,
-  key: vi.fn(),
-}
-
-vi.stubGlobal('localStorage', localStorageMock)
-
-// Mock Worker
-class MockWorker implements Worker {
-  onerror: ((this: AbstractWorker, ev: ErrorEvent) => any) | null = null
-  onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null
-  onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null
-
-  postMessage(message: any, transfer: Transferable[]): void;
-  postMessage(message: any, options?: StructuredSerializeOptions): void;
-  postMessage(message: any, transferOrOptions?: Transferable[] | StructuredSerializeOptions): void {
-    if (this.onmessage) {
-      this.onmessage.call(this, new MessageEvent('message', { data: message }))
-    }
-  }
-
-  terminate(): void {
-    // Implementation not needed for tests
-  }
-
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-  dispatchEvent = vi.fn()
-}
-
-// Mock MediaStreamTrack
-class MockMediaStreamTrack implements MediaStreamTrack {
-  enabled = true;
-  id = 'mock-track-id';
-  kind = 'audio';
-  label = 'Mock Track';
-  muted = false;
-  readyState: MediaStreamTrackState = 'live';
-  contentHint = '';
-  isolated = false;
-
-  onended: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
-  onisolationchange: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
-  onmute: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
-  onunmute: ((this: MediaStreamTrack, ev: Event) => any) | null = null;
-
-  applyConstraints(): Promise<void> {
-    return Promise.resolve();
-  }
-
-  clone(): MediaStreamTrack {
-    return new MockMediaStreamTrack();
-  }
-
-  getCapabilities(): MediaTrackCapabilities {
-    return {};
-  }
-
-  getConstraints(): MediaTrackConstraints {
-    return {};
-  }
-
-  getSettings(): MediaTrackSettings {
-    return {};
-  }
-
-  stop(): void {}
-
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  dispatchEvent(): boolean {
-    return true;
-  }
-}
-
 // Add new mocks to global scope
-vi.stubGlobal('Worker', function MockWorker() {
+vi.stubGlobal('Worker', function MockWorkerConstructor() {
   return {
     postMessage: vi.fn(),
     terminate: vi.fn(),
     addEventListener: vi.fn(),
     removeEventListener: vi.fn()
   }
+})
+
+vi.stubGlobal('MediaStream', function(tracks?: MediaStreamTrack[]) {
+  return new MockMediaStream(tracks);
 })
 
 vi.stubGlobal('MediaStreamTrack', MockMediaStreamTrack)
@@ -407,4 +340,114 @@ export function setDocumentVisibility(state: DocumentVisibilityState) {
   documentVisibilityState = state;
   document.dispatchEvent(new Event('visibilitychange'));
 }
+
+// Mock environment variables
+process.env = {
+  ...process.env,
+  NEXT_PUBLIC_DAILY_API_KEY: 'test-daily-key',
+  NEXT_PUBLIC_DAILY_DOMAIN: 'test-domain.daily.co',
+  NEXT_PUBLIC_DAILY_ROOM_URL: 'https://test-domain.daily.co/room',
+  ELEVENLABS_API_KEY: 'test-elevenlabs-key',
+  DEEPSEEK_API_KEY: 'test-deepseek-key',
+  NODE_ENV: 'test',
+  WHISPER_API_ENDPOINT: 'https://api.whisper.ai/v1/transcribe',
+  ELEVENLABS_API_ENDPOINT: 'https://api.elevenlabs.ai/v1',
+  EMOTION_API_ENDPOINT: 'https://api.emotion.ai/v1/detect',
+  WHISPER_API_KEY: 'test_whisper_key',
+  EMOTION_API_KEY: 'test_emotion_key'
+};
+
+// Mock window.matchMedia
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: vi.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
+// Mock WebRTC APIs
+const mockRTCPeerConnection = vi.fn().mockImplementation(() => ({
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  createOffer: vi.fn().mockResolvedValue({}),
+  createAnswer: vi.fn().mockResolvedValue({}),
+  setLocalDescription: vi.fn().mockResolvedValue({}),
+  setRemoteDescription: vi.fn().mockResolvedValue({}),
+  addIceCandidate: vi.fn().mockResolvedValue({}),
+  close: vi.fn(),
+})) as unknown as typeof RTCPeerConnection;
+
+mockRTCPeerConnection.generateCertificate = () =>
+  Promise.resolve({} as RTCCertificate);
+
+global.RTCPeerConnection = mockRTCPeerConnection;
+
+// Mock MediaDevices API
+Object.defineProperty(global.navigator, 'mediaDevices', {
+  value: {
+    getUserMedia: vi.fn().mockResolvedValue({}),
+    enumerateDevices: vi.fn().mockResolvedValue([]),
+  },
+  writable: true,
+});
+
+// Mock Audio Context
+(global as any).AudioContext = MockAudioContext;
+(global as any).webkitAudioContext = MockAudioContext;
+
+// Mock MediaRecorder
+interface MockMediaRecorderType {
+  state: string;
+  ondataavailable: ((event: any) => void) | null;
+  onstop: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+class MockMediaRecorderImpl implements MockMediaRecorderType {
+  state: string = 'inactive';
+  ondataavailable: ((event: any) => void) | null = null;
+  onstop: (() => void) | null = null;
+
+  start() {
+    this.state = 'recording';
+  }
+
+  stop() {
+    this.state = 'inactive';
+    if (this.onstop) this.onstop();
+  }
+}
+
+global.MediaRecorder = MockMediaRecorderImpl as any;
+
+// Mock fetch responses
+global.fetch = vi.fn().mockImplementation((url: string) => {
+  if (url.includes('whisper')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ text: 'Mocked transcription', confidence: 0.95 })
+    });
+  }
+  if (url.includes('elevenlabs')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ audio: new ArrayBuffer(1024) })
+    });
+  }
+  if (url.includes('emotion')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ type: 'happy', confidence: 0.85 })
+    });
+  }
+  return Promise.reject(new Error('Not found'));
+});
 

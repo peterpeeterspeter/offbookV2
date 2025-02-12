@@ -5,65 +5,33 @@
     "es2020": true
   },
   "extends": [
-    "eslint:recommended",
+    "next/core-web-vitals",
     "plugin:@typescript-eslint/recommended",
-    "plugin:@typescript-eslint/recommended-requiring-type-checking",
-    "plugin:react-hooks/recommended",
-    "plugin:react/recommended",
-    "plugin:react/jsx-runtime"
+    "prettier"
   ],
   "ignorePatterns": ["dist", ".eslintrc.json", "**/*.d.ts"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "ecmaVersion": "latest",
-    "sourceType": "module",
-    "project": "./tsconfig.json",
-    "tsconfigRootDir": "."
+    "project": "./tsconfig.json"
   },
-  "plugins": ["react-refresh", "@typescript-eslint", "react"],
+  "plugins": ["@typescript-eslint"],
   "rules": {
-    "react-refresh/only-export-components": [
-      "warn",
-      { "allowConstantExport": true }
-    ],
-    "@typescript-eslint/no-explicit-any": "warn",
-    "@typescript-eslint/no-unsafe-assignment": "warn",
-    "@typescript-eslint/no-unsafe-member-access": "warn",
-    "@typescript-eslint/no-unsafe-call": "warn",
-    "@typescript-eslint/no-unsafe-return": "warn",
-    "@typescript-eslint/no-unsafe-argument": "warn",
-    "@typescript-eslint/no-floating-promises": "warn",
-    "@typescript-eslint/require-await": "warn",
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      {
-        "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_",
-        "caughtErrorsIgnorePattern": "^_"
-      }
-    ],
-    "@typescript-eslint/ban-ts-comment": [
-      "error",
-      {
-        "ts-expect-error": "allow-with-description",
-        "ts-ignore": true,
-        "ts-nocheck": true,
-        "ts-check": false,
-        "minimumDescriptionLength": 10
-      }
-    ],
-    "@typescript-eslint/no-misused-promises": [
-      "error",
-      {
-        "checksVoidReturn": {
-          "arguments": false,
-          "attributes": false
-        }
-      }
-    ],
-    "react/prop-types": "off",
-    "no-case-declarations": "warn"
+    "@typescript-eslint/no-namespace": "off",
+    "@typescript-eslint/no-explicit-any": "off"
   },
+  "overrides": [
+    {
+      "files": ["**/__tests__/**/*.[jt]s?(x)", "**/?(*.)+(spec|test).[jt]s?(x)", "jest.setup.ts", "jest.config.js", "scripts/**/*.js"],
+      "env": {
+        "jest": true,
+        "node": true
+      },
+      "rules": {
+        "@typescript-eslint/no-var-requires": "off",
+        "@typescript-eslint/no-namespace": "off"
+      }
+    }
+  ],
   "settings": {
     "react": {
       "version": "detect"

@@ -3,15 +3,9 @@ import {
   AudioServiceEvent,
   AudioServiceError,
   AudioErrorCategory,
-  AudioServiceStateType,
-  AudioServiceEventType,
-  AudioServiceErrorType,
-  AudioErrorCategoryType,
-  AudioServiceContext,
-  AudioServiceSession,
-  AudioServiceStateData,
-  AudioErrorDetails,
-  StateTransitions
+  type AudioServiceContext,
+  type AudioServiceStateData,
+  type AudioErrorDetails
 } from '@/types/audio';
 
 // Export enums as values
@@ -24,19 +18,14 @@ export {
 
 // Export types
 export type {
-  AudioServiceStateType,
-  AudioServiceEventType,
-  AudioServiceErrorType,
-  AudioErrorCategoryType,
   AudioServiceContext,
-  AudioServiceSession,
   AudioServiceStateData,
   AudioErrorDetails
 };
 
 type StateTransitionMap = {
-  [K in AudioServiceStateType]?: {
-    [E in AudioServiceEventType]?: AudioServiceStateType;
+  [K in AudioServiceState]?: {
+    [E in AudioServiceEvent]?: AudioServiceState;
   };
 };
 
@@ -44,7 +33,8 @@ const stateTransitions: StateTransitionMap = {
   [AudioServiceState.UNINITIALIZED]: {
     [AudioServiceEvent.INITIALIZE]: AudioServiceState.INITIALIZING,
     [AudioServiceEvent.CLEANUP]: AudioServiceState.UNINITIALIZED,
-    [AudioServiceEvent.ERROR]: AudioServiceState.ERROR
+    [AudioServiceEvent.ERROR]: AudioServiceState.ERROR,
+    [AudioServiceEvent.RECORDING_STOP]: AudioServiceState.ERROR
   },
   [AudioServiceState.INITIALIZING]: {
     [AudioServiceEvent.INITIALIZED]: AudioServiceState.READY,
@@ -70,7 +60,7 @@ const stateTransitions: StateTransitionMap = {
   }
 };
 
-const errorMessageMap: Record<keyof typeof AudioServiceError, string> = {
+const errorMessageMap: Record<AudioServiceError, string> = {
   [AudioServiceError.INITIALIZATION_FAILED]: 'Failed to initialize audio service',
   [AudioServiceError.TTS_INITIALIZATION_FAILED]: 'Failed to initialize text-to-speech',
   [AudioServiceError.RECORDING_FAILED]: 'Recording failed',
@@ -81,7 +71,9 @@ const errorMessageMap: Record<keyof typeof AudioServiceError, string> = {
   [AudioServiceError.PERMISSION_DENIED]: 'Microphone permission denied',
   [AudioServiceError.DEVICE_NOT_FOUND]: 'Audio device not found',
   [AudioServiceError.DEVICE_IN_USE]: 'Audio device is in use',
-  [AudioServiceError.SYSTEM_ERROR]: 'System error occurred'
+  [AudioServiceError.SYSTEM_ERROR]: 'System error occurred',
+  [AudioServiceError.BROWSER_UNSUPPORTED]: 'Browser not supported',
+  [AudioServiceError.MEMORY_EXCEEDED]: 'Memory limit exceeded'
 };
 
 export { errorMessageMap as ERROR_MESSAGES };
@@ -109,12 +101,10 @@ export class AudioStateManager {
   private constructor() {
     this.state = {
       state: AudioServiceState.UNINITIALIZED,
-      status: 'uninitialized',
-      timestamp: Date.now(),
       error: undefined,
       context: {
         sampleRate: 44100,
-        channels: 1,
+        channelCount: 1,
         isContextRunning: false,
         vadEnabled: false,
         vadThreshold: 0.5,
@@ -123,12 +113,8 @@ export class AudioStateManager {
         noiseThreshold: 0.1,
         silenceThreshold: 0.2
       },
-      session: {
-        id: null,
-        startTime: null,
-        duration: null,
-        chunks: 0
-      }
+      isContextRunning: false,
+      sampleRate: 44100
     };
   }
 
@@ -150,13 +136,27 @@ export class AudioStateManager {
     };
   }
 
-  transition(event: AudioServiceEventType, context?: Partial<AudioServiceStateData>): void {
+  transition(event: AudioServiceEvent, context?: Partial<AudioServiceStateData>): void {
     const currentState = this.state.state;
     const transitions = stateTransitions[currentState];
     const nextState = transitions?.[event];
 
     if (!nextState) {
       console.warn(`Invalid transition: ${currentState} -> ${event}`);
+      // Move to ERROR state with invalid transition error
+      this.state = {
+        ...this.state,
+        state: AudioServiceState.ERROR,
+        error: {
+          code: AudioServiceError.SYSTEM_ERROR,
+          message: `Invalid state transition: ${currentState} -> ${event}`,
+          details: {
+            fromState: currentState,
+            event: event
+          }
+        }
+      };
+      this.notifySubscribers();
       return;
     }
 
@@ -164,12 +164,7 @@ export class AudioStateManager {
       ...this.state,
       ...context,
       state: nextState,
-      status: nextState === AudioServiceState.ERROR ? 'error' :
-             nextState === AudioServiceState.UNINITIALIZED ? 'uninitialized' :
-             nextState === AudioServiceState.INITIALIZING ? 'initializing' : 'ready',
-      timestamp: Date.now(),
-      // Clear error when transitioning out of ERROR state
-      error: nextState === AudioServiceState.ERROR ? this.state.error : undefined
+      error: nextState === AudioServiceState.ERROR ? (context?.error || this.state.error) : undefined
     };
 
     this.notifySubscribers();
@@ -195,14 +190,16 @@ export class AudioStateManager {
       [AudioServiceError.INITIALIZATION_FAILED]: AudioErrorCategory.INITIALIZATION,
       [AudioServiceError.TTS_INITIALIZATION_FAILED]: AudioErrorCategory.INITIALIZATION,
       [AudioServiceError.RECORDING_FAILED]: AudioErrorCategory.RECORDING,
-      [AudioServiceError.CLEANUP_FAILED]: AudioErrorCategory.CLEANUP,
+      [AudioServiceError.CLEANUP_FAILED]: AudioErrorCategory.SYSTEM,
       [AudioServiceError.PROCESSING_FAILED]: AudioErrorCategory.PROCESSING,
       [AudioServiceError.VAD_FAILED]: AudioErrorCategory.PROCESSING,
       [AudioServiceError.NETWORK_TIMEOUT]: AudioErrorCategory.NETWORK,
       [AudioServiceError.PERMISSION_DENIED]: AudioErrorCategory.PERMISSION,
       [AudioServiceError.DEVICE_NOT_FOUND]: AudioErrorCategory.DEVICE,
       [AudioServiceError.DEVICE_IN_USE]: AudioErrorCategory.DEVICE,
-      [AudioServiceError.SYSTEM_ERROR]: AudioErrorCategory.SYSTEM
+      [AudioServiceError.SYSTEM_ERROR]: AudioErrorCategory.SYSTEM,
+      [AudioServiceError.BROWSER_UNSUPPORTED]: AudioErrorCategory.BROWSER,
+      [AudioServiceError.MEMORY_EXCEEDED]: AudioErrorCategory.RESOURCE
     };
     return categoryMap[code];
   }
@@ -228,12 +225,10 @@ export class AudioStateManager {
   restore(): void {
     this.state = {
       state: AudioServiceState.UNINITIALIZED,
-      status: 'uninitialized',
-      timestamp: Date.now(),
       error: undefined,
       context: {
         sampleRate: 44100,
-        channels: 1,
+        channelCount: 1,
         isContextRunning: false,
         vadEnabled: false,
         vadThreshold: 0.5,
@@ -242,12 +237,8 @@ export class AudioStateManager {
         noiseThreshold: 0.1,
         silenceThreshold: 0.2
       },
-      session: {
-        id: null,
-        startTime: null,
-        duration: null,
-        chunks: 0
-      }
+      isContextRunning: false,
+      sampleRate: 44100
     };
     this.notifySubscribers();
   }
