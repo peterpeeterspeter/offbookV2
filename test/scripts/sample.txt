@@ -1,0 +1,11 @@
+# Romeo and Juliet v1.0
+
+## Act 1 Scene 1
+[Romeo] But soft, what light through yonder window breaks?
+[Juliet] O Romeo, Romeo, wherefore art thou Romeo?
+[Romeo] Shall I hear more, or shall I speak at this?
+
+## Act 1 Scene 2
+[Nurse] Madam, your mother craves a word with you.
+[Juliet] I come anon.
+[Romeo] O blessed night!

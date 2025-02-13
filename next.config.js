@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
-  poweredByHeader: false,
   reactStrictMode: true,
-  swcMinify: true,
+  poweredByHeader: false,
 
   // Security headers
   async headers() {
@@ -31,70 +29,23 @@ const nextConfig = {
             key: "Referrer-Policy",
             value: "origin-when-cross-origin",
           },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
-          },
         ],
       },
     ];
   },
 
-  // Rate limiting
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/api/:path*",
-          has: [
-            {
-              type: "query",
-              key: "apikey",
-              value: process.env.API_KEY,
-            },
-          ],
-          destination: "/api/:path*",
-        },
-      ],
-    };
+  // Server configuration
+  server: {
+    host: "127.0.0.1",
+    port: 3333,
   },
 
-  // Image optimization
-  images: {
-    domains: ["offbook.app"],
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
-    imageSizes: [16, 32, 48, 64, 96, 128, 256],
-    formats: ["image/webp"],
-  },
-
-  // Build optimization
-  compiler: {
-    removeConsole: process.env.NODE_ENV === "production",
-  },
-
-  // Performance optimization
-  experimental: {
-    optimizeCss: true,
-    scrollRestoration: true,
-    legacyBrowsers: false,
-  },
-
-  env: {
-    NEXT_PUBLIC_DAILY_ROOM_URL: process.env.NEXT_PUBLIC_DAILY_ROOM_URL,
-  },
-
-  webpack: (config, { isServer }) => {
-    // Audio worklet support
-    config.resolve.fallback = {
-      ...config.resolve.fallback,
-      "audio-worklet": false,
-    };
-
+  // Module resolution
+  webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
       "@": "./src",
     };
-
     return config;
   },
 };

@@ -69,30 +69,34 @@ export class ScriptProcessingService {
       const scenes: Scene[] = [];
       const actors = new Set<string>();
       let currentScene: Scene | null = null;
+      let hasValidTitle = false;
 
       for (const line of lines) {
         if (line.startsWith('#') && !line.startsWith('##')) {
           // Title and version
           const match = line.match(/# (.*) v(\d+\.\d+)/);
-          if (!match) {
+          if (!match || !match[1] || !match[2]) {
             return {
               success: false,
               errors: ['Invalid title/version format']
             };
           }
-          [, title, version] = match;
+          title = match[1];
+          version = match[2];
+          hasValidTitle = true;
         } else if (line.startsWith('##')) {
           // Scene header
           const sceneName = line.substring(2).trim();
           if (currentScene) {
             currentScene.transitions.next = sceneName;
           }
+          const prevSceneName: string | null = currentScene ? currentScene.name : null;
           currentScene = {
             name: sceneName,
             lines: [],
             transitions: {
               next: null,
-              prev: currentScene?.name || null
+              prev: prevSceneName
             }
           };
           scenes.push(currentScene);
@@ -105,16 +109,36 @@ export class ScriptProcessingService {
             };
           }
           const match = line.match(/^\[(.*?)\] (.*)/);
-          if (!match) {
+          if (!match || !match[1] || !match[2]) {
             return {
               success: false,
               errors: ['Invalid line format']
             };
           }
-          const [, actor, text] = match;
+          const actor = match[1];
+          const text = match[2];
           actors.add(actor);
           currentScene.lines.push({ actor, text });
+        } else {
+          return {
+            success: false,
+            errors: ['Invalid line format: ' + line]
+          };
         }
+      }
+
+      if (!hasValidTitle) {
+        return {
+          success: false,
+          errors: ['Missing title and version']
+        };
+      }
+
+      if (scenes.length === 0) {
+        return {
+          success: false,
+          errors: ['No scenes found in script']
+        };
       }
 
       const script: Script = {
@@ -289,10 +313,11 @@ export class ScriptProcessingService {
   }
 
   public getCurrentVersion(): ScriptVersion {
-    if (this.currentVersionIndex === -1) {
-      throw new Error('No versions available');
+    const currentVersion = this.versions[this.currentVersionIndex];
+    if (this.currentVersionIndex === -1 || !currentVersion) {
+      throw new Error('No version history available');
     }
-    return this.versions[this.currentVersionIndex];
+    return currentVersion;
   }
 
   public rollbackToVersion(versionId: string): { success: boolean; error?: string } {
@@ -310,6 +335,9 @@ export class ScriptProcessingService {
 
   private incrementVersion(version: string): string {
     const [major, minor] = version.split('.').map(Number);
+    if (typeof major !== 'number' || typeof minor !== 'number') {
+      throw new Error('Invalid version format');
+    }
     return `${major}.${minor + 1}`;
   }
 }
