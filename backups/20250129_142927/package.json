@@ -15,7 +15,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.55.1",
+    "@daily-co/daily-js": "^0.74.0",
     "@radix-ui/react-slot": "^1.0.2",
     "chalk": "^4.1.2",
     "class-variance-authority": "^0.7.0",
