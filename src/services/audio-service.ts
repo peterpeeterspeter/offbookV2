@@ -363,16 +363,27 @@ export class AudioServiceImpl implements AudioService {
   async startRecording(sessionId: string): Promise<void> {
     try {
       const currentState = this.stateManager.getState().state;
+
+      // If in error state, try to recover
       if (currentState === AudioServiceState.ERROR) {
-        await this.setup(); // Try to recover from error state
+        await this.cleanup();
+        await this.setup();
       }
 
-      if (currentState !== AudioServiceState.READY) {
-        throw new Error('Invalid state for recording: ' + currentState);
+      // Check state after potential recovery
+      const stateAfterRecovery = this.stateManager.getState().state;
+      if (stateAfterRecovery !== AudioServiceState.READY) {
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: `Invalid state for recording: ${stateAfterRecovery}. Must be in READY state.`
+        });
       }
 
       if (!this.mediaStream) {
-        throw new Error('Media stream not available');
+        throw new ScriptAnalysisError({
+          code: ScriptAnalysisErrorCode.INVALID_STATE,
+          message: 'Media stream not available'
+        });
       }
 
       this.mediaRecorder = new MediaRecorder(this.mediaStream);
@@ -391,11 +402,17 @@ export class AudioServiceImpl implements AudioService {
         duration: 0,
         audioData: new Float32Array()
       };
+
       this.stateManager.transition(AudioServiceEvent.RECORDING_START);
-      return;
     } catch (error) {
-      this.handleError(error, ScriptAnalysisErrorCode.PROCESSING_FAILED);
-      return;
+      const scriptError = error instanceof ScriptAnalysisError ? error : new ScriptAnalysisError({
+        code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+        message: error instanceof Error ? error.message : String(error),
+        details: { originalError: error }
+      });
+
+      this.stateManager.transition(AudioServiceEvent.ERROR, { error: scriptError });
+      throw scriptError;
     }
   }
 
@@ -586,7 +603,11 @@ export class AudioServiceImpl implements AudioService {
 
     try {
       if (this.vadService) {
-        await this.vadService.stop().catch(console.error);
+        try {
+          await this.vadService.stop();
+        } catch (error) {
+          console.error('Error stopping VAD service:', error);
+        }
         this.vadService = null;
       }
 
@@ -600,25 +621,28 @@ export class AudioServiceImpl implements AudioService {
       }
 
       if (this.audioContext) {
-        await this.audioContext.close().catch(console.error);
+        try {
+          await this.audioContext.close();
+        } catch (error) {
+          console.error('Error closing audio context:', error);
+        }
         this.audioContext = null;
       }
 
       this.audioChunks = [];
       this.currentSession = null;
 
-      // Only transition to UNINITIALIZED if we're not already there
-      const currentState = this.stateManager.getState().state;
-      if (currentState !== AudioServiceState.UNINITIALIZED) {
-        this.stateManager.transition(AudioServiceEvent.CLEANUP);
-      }
+      // Always transition to UNINITIALIZED after cleanup
+      this.stateManager.transition(AudioServiceEvent.CLEANUP);
     } catch (error) {
       console.error('Cleanup failed:', error);
+      const errorDetails = error instanceof Error ? error : new Error(String(error));
       this.stateManager.transition(AudioServiceEvent.ERROR, {
         error: this.stateManager.createError(AudioServiceError.CLEANUP_FAILED, {
-          originalError: error instanceof Error ? error : new Error(String(error))
+          originalError: errorDetails
         })
       });
+      throw errorDetails;
     } finally {
       this.isCleaningUp = false;
     }

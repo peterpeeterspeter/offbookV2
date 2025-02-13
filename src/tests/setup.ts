@@ -321,7 +321,6 @@ const mockContext = {
   putImageData: vi.fn(),
   drawImage: vi.fn(),
   createImageData: vi.fn(),
-  getParameter: vi.fn().mockReturnValue(true),
   getSupportedExtensions: vi.fn().mockReturnValue([]),
   getExtension: vi.fn().mockReturnValue(null),
   getShaderPrecisionFormat: vi.fn().mockReturnValue({
@@ -342,27 +341,41 @@ const mockContext = {
   })
 }
 
+// Mock WebGL context
+const mockWebGLContext = {
+  getParameter: vi.fn((param) => {
+    if (param === 0x0D33) return 4096;
+    return null;
+  }),
+  getSupportedExtensions: vi.fn(() => ['OES_texture_float']),
+  getExtension: vi.fn((name) => {
+    if (name === 'WEBGL_lose_context') return { loseContext: vi.fn() };
+    return null;
+  }),
+  MAX_TEXTURE_SIZE: 0x0D33
+};
+
 const mockCanvas = {
   getContext: vi.fn((contextId: string) => {
-    if (contextId === 'webgl' || contextId === 'webgl2' || contextId === '2d') {
-      return mockContext
+    if (contextId === 'webgl' || contextId === 'webgl2' || contextId === 'experimental-webgl') {
+      return mockWebGLContext;
     }
-    return null
+    return null;
   }),
   toDataURL: vi.fn().mockReturnValue('data:image/png;base64,'),
   toBlob: vi.fn().mockImplementation(callback => callback(new MockBlob([]))),
   width: 300,
   height: 150
-}
+};
 
 // Mock document.createElement for canvas
-const originalCreateElement = document.createElement.bind(document)
+const originalCreateElement = document.createElement.bind(document);
 vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
   if (tagName.toLowerCase() === 'canvas') {
-    return mockCanvas as any
+    return mockCanvas as any;
   }
-  return originalCreateElement(tagName)
-})
+  return originalCreateElement(tagName);
+});
 
 // Mock MediaStream implementation
 class MockMediaStream {
@@ -565,19 +578,9 @@ declare global {
   }
 }
 
-// Mock WebGL context
-const mockWebGLContext = {
-  getParameter: vi.fn().mockReturnValue(4096),
-  getSupportedExtensions: vi.fn().mockReturnValue(['OES_texture_float', 'WEBGL_depth_texture']),
-  MAX_TEXTURE_SIZE: 0x0D33
-};
-
 // Mock canvas context
 HTMLCanvasElement.prototype.getContext = vi.fn().mockImplementation((contextType) => {
-  if (contextType === 'webgl' || contextType === 'experimental-webgl') {
-    return mockWebGLContext;
-  }
-  if (contextType === 'webgl2') {
+  if (contextType === 'webgl' || contextType === 'experimental-webgl' || contextType === 'webgl2') {
     return mockWebGLContext;
   }
   return null;

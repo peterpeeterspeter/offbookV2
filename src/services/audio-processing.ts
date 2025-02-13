@@ -405,8 +405,12 @@ export class AudioProcessingService {
     let peak = 0;
     for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
       const data = buffer.getChannelData(channel);
-      for (let i = 0; i < data.length; i++) {
-        peak = Math.max(peak, Math.abs(data[i]));
+      const dataLength = data.length;
+      for (let i = 0; i < dataLength; i++) {
+        const value = data[i];
+        if (typeof value === 'number') {
+          peak = Math.max(peak, Math.abs(value));
+        }
       }
     }
     return 20 * Math.log10(peak);
@@ -417,18 +421,33 @@ export class AudioProcessingService {
     destination: AudioNode,
     options: ProcessingOptions
   ): Promise<AudioBuffer> {
+    const buffer = source.buffer;
+    if (!buffer) {
+      throw new Error('Source buffer is undefined');
+    }
+
+    const channels = options.channels ?? 2;
+    const defaultSampleRate = 44100; // Standard CD-quality sample rate
+    const sampleRate = Math.floor(options.sampleRate ?? this.context.sampleRate ?? defaultSampleRate) as number;
+
     return new Promise((resolve) => {
       const offlineContext = new OfflineAudioContext(
-        options.channels ?? 2,
-        source.buffer?.length ?? 0,
-        options.sampleRate ?? this.context.sampleRate
+        channels,
+        buffer.length,
+        sampleRate
       );
 
-      source.connect(destination);
-      destination.connect(offlineContext.destination);
+      const offlineSource = offlineContext.createBufferSource();
+      offlineSource.buffer = buffer;
+
+      const offlineDestination = offlineContext.createDynamicsCompressor();
+      Object.assign(offlineDestination, destination);
+
+      offlineSource.connect(offlineDestination);
+      offlineDestination.connect(offlineContext.destination);
 
       offlineContext.startRendering().then(resolve);
-      source.start();
+      offlineSource.start();
     });
   }
 

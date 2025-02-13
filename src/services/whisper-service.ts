@@ -55,7 +55,7 @@ export class WhisperService {
   private initializeVisibilityTracking(): void {
     const handleVisibilityChange = () => this.handleVisibilityChange();
     const handleMemoryWarning = () => this.handleMemoryWarning();
-    const handleAudioInterruption = (event: Event) => this.handleAudioInterruption(event);
+    const handleAudioInterruption = () => this.handleAudioInterruption();
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('memorywarning', handleMemoryWarning);
@@ -72,8 +72,10 @@ export class WhisperService {
     this.updateQualityLevel();
   }
 
-  private handleAudioInterruption(event: Event): void {
-    this.onError?.(new Error('Audio session interrupted'));
+  private handleAudioInterruption(): void {
+    if (this.onError) {
+      this.onError(new Error('Audio session interrupted'));
+    }
     this.updateQualityLevel();
   }
 
@@ -116,7 +118,7 @@ export class WhisperService {
   private async initializeBatteryMonitoring(): Promise<void> {
     if (this.deviceCapabilities.hasBatteryAPI) {
       try {
-        const batteryManager = await (navigator as any).getBattery();
+        const batteryManager = await (navigator as any).getBattery() as BatteryManager;
         this.batteryManager = batteryManager;
         const handleBatteryChange = () => this.handleBatteryChange();
         batteryManager.addEventListener('levelchange', handleBatteryChange);
@@ -189,7 +191,9 @@ export class WhisperService {
 
       if (this.currentQualityLevel !== newLevel) {
         this.currentQualityLevel = newLevel;
-        this.onQualityChange?.(newLevel);
+        if (this.onQualityChange) {
+          this.onQualityChange(newLevel);
+        }
       }
     }, this.QUALITY_CHANGE_DEBOUNCE);
   }
@@ -210,18 +214,20 @@ export class WhisperService {
 
   private initializeWebSocket(): void {
     this.socket = new WebSocket(this.options.websocketUrl);
-    const handleWebSocketError = (event: Event) => this.handleWebSocketError(event);
-    const handleWebSocketClose = (event: Event) => this.handleWebSocketClose(event);
+    const handleWebSocketError = () => this.handleWebSocketError();
+    const handleWebSocketClose = () => this.handleWebSocketClose();
     this.socket.addEventListener('error', handleWebSocketError);
     this.socket.addEventListener('close', handleWebSocketClose);
   }
 
-  private handleWebSocketError(event: Event): void {
-    this.onError?.(new Error('WebSocket error occurred'));
+  private handleWebSocketError(): void {
+    if (this.onError) {
+      this.onError(new Error('WebSocket error occurred'));
+    }
     this.updateQualityLevel();
   }
 
-  private handleWebSocketClose(event: Event): void {
+  private handleWebSocketClose(): void {
     if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
       this.reconnectAttempts++;
       this.initializeWebSocket();
@@ -243,7 +249,7 @@ export class WhisperService {
 
     const handleVisibilityChange = () => this.handleVisibilityChange();
     const handleMemoryWarning = () => this.handleMemoryWarning();
-    const handleAudioInterruption = (event: Event) => this.handleAudioInterruption(event);
+    const handleAudioInterruption = () => this.handleAudioInterruption();
 
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('memorywarning', handleMemoryWarning);
@@ -266,20 +272,55 @@ export class WhisperService {
   public onError?: (error: Error) => void;
 
   public async transcribeAudio(blob: Blob): Promise<string> {
-    if (this.isBackgrounded) {
-      return Promise.reject(new Error('Cannot process audio while in background'));
+    const cacheKey = await this.generateCacheKey(blob);
+    const cached = this.transcriptionCache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.transcription;
     }
 
-    // Implement throttling based on device memory
-    if ((navigator as any).deviceMemory && (navigator as any).deviceMemory < 4) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    const transcription = await this.processAudio(blob);
+    this.transcriptionCache.set(cacheKey, {
+      timestamp: Date.now(),
+      transcription
+    });
 
-    return this.processAudio(blob);
+    return transcription;
+  }
+
+  private async generateCacheKey(blob: Blob): Promise<string> {
+    const buffer = await blob.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   private async processAudio(blob: Blob): Promise<string> {
-    // Implementation details...
-    return 'transcription';
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket connection not ready');
+    }
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (!this.socket) {
+          reject(new Error('WebSocket connection lost'));
+          return;
+        }
+
+        this.socket.send(reader.result as ArrayBuffer);
+        this.socket.onmessage = (event) => {
+          const response = JSON.parse(event.data);
+          if (response.error) {
+            reject(new Error(response.error));
+          } else {
+            resolve(response.transcription);
+          }
+        };
+      };
+
+      reader.onerror = () => reject(new Error('Failed to read audio file'));
+      reader.readAsArrayBuffer(blob);
+    });
   }
 }

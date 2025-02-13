@@ -164,6 +164,13 @@ export interface WebAPISupport {
   webAssembly: boolean
 }
 
+export interface WebGLSupport {
+  webgl: boolean
+  webgl2: boolean
+  extensions: string[]
+  maxTextureSize: number
+}
+
 export interface BrowserFeatures {
   webrtc: WebRTCSupport
   audio: AudioSupport
