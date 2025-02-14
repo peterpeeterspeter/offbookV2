@@ -49,14 +49,31 @@ export class BrowserCompatibilityTester {
   public async checkAudioSupport(): Promise<AudioSupport> {
     const AudioContext = window.AudioContext || window.webkitAudioContext
     const hasAudioContext = !!AudioContext
-    const sampleRate = hasAudioContext ? new AudioContext().sampleRate : 0
-    const channelCount = hasAudioContext ? 2 : 0
+    let sampleRate = 0
+    let channelCount = 0
+    let audioWorkletSupport = false
+
+    try {
+      if (hasAudioContext) {
+        const context = new AudioContext()
+        sampleRate = context.sampleRate
+        channelCount = context.destination.maxChannelCount
+        audioWorkletSupport = 'audioWorklet' in context
+        // Properly close the context to free resources
+        await context.close()
+      }
+    } catch (error) {
+      console.warn('Audio context initialization failed:', error)
+    }
+
+    const mediaDevicesSupport = await this.checkMediaDevicesSupport()
 
     return {
       webAudio: hasAudioContext,
       mediaRecorder: 'MediaRecorder' in window,
-      audioWorklet: hasAudioContext && 'audioWorklet' in AudioContext.prototype,
-      mediaDevices: 'mediaDevices' in navigator,
+      audioWorklet: audioWorkletSupport,
+      mediaDevices: mediaDevicesSupport.supported,
+      mediaDevicesError: mediaDevicesSupport.error,
       sampleRate,
       channelCount,
       audioCodecs: ['audio/webm', 'audio/mp4', 'audio/mpeg'],
@@ -69,8 +86,103 @@ export class BrowserCompatibilityTester {
     }
   }
 
+  private async checkMediaDevicesSupport(): Promise<{ supported: boolean; error?: string }> {
+    if (!('mediaDevices' in navigator)) {
+      return { supported: false, error: 'MediaDevices API not supported' }
+    }
+
+    try {
+      // Check if we can actually access media devices
+      await navigator.mediaDevices.getUserMedia({ audio: true })
+      return { supported: true }
+    } catch (error) {
+      const err = error as Error
+      return {
+        supported: false,
+        error: err.name === 'NotAllowedError' ? 'Permission denied' :
+               err.name === 'NotFoundError' ? 'No audio devices found' :
+               `Media device error: ${err.message}`
+      }
+    }
+  }
+
   public async checkGraphicsSupport(): Promise<BrowserFeatures['graphics']> {
-    return checkWebGLSupport();
+    try {
+      const support = checkWebGLSupport()
+      const performanceSupport = await this.checkWebGLPerformance(support)
+
+      return {
+        ...support,
+        performance: performanceSupport,
+        fallback: this.getGraphicsFallbackOptions(support)
+      }
+    } catch (error) {
+      console.warn('Graphics support check failed:', error)
+      return {
+        webgl: false,
+        webgl2: false,
+        extensions: [],
+        maxTextureSize: 0,
+        performance: { score: 0, capabilities: [] },
+        fallback: {
+          canvas2D: 'canvas' in document,
+          css3D: this.checkCSS3DSupport()
+        }
+      }
+    }
+  }
+
+  private async checkWebGLPerformance(support: WebGLSupport): Promise<{
+    score: number;
+    capabilities: string[];
+  }> {
+    if (!support.webgl) {
+      return { score: 0, capabilities: [] }
+    }
+
+    const capabilities: string[] = []
+    const canvas = document.createElement('canvas')
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+
+    if (gl) {
+      // Check for key capabilities
+      capabilities.push(
+        ...[
+          gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 4096 && 'high-res-textures',
+          gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) >= 4096 && 'high-res-rendering',
+          support.extensions.includes('WEBGL_compressed_texture_s3tc') && 'compressed-textures',
+          support.extensions.includes('OES_texture_float') && 'float-textures'
+        ].filter(Boolean) as string[]
+      )
+
+      // Calculate performance score (0-100)
+      const score = Math.min(100, Math.floor(
+        (capabilities.length / 4) * 100 +
+        (support.webgl2 ? 30 : 0) +
+        (support.maxTextureSize >= 8192 ? 20 : 0)
+      ))
+
+      return { score, capabilities }
+    }
+
+    return { score: 0, capabilities: [] }
+  }
+
+  private checkCSS3DSupport(): boolean {
+    const el = document.createElement('div')
+    return 'transform' in el.style &&
+           'perspective' in el.style &&
+           'transformStyle' in el.style
+  }
+
+  private getGraphicsFallbackOptions(support: WebGLSupport): {
+    canvas2D: boolean;
+    css3D: boolean;
+  } {
+    return {
+      canvas2D: 'canvas' in document,
+      css3D: this.checkCSS3DSupport()
+    }
   }
 
   public async checkStorageSupport(): Promise<StorageSupport> {

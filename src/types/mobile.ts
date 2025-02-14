@@ -101,6 +101,7 @@ export interface AudioSupport {
   mediaRecorder: boolean
   audioWorklet: boolean
   mediaDevices: boolean
+  mediaDevicesError?: string
   sampleRate: number
   channelCount: number
   audioCodecs: string[]
@@ -117,6 +118,14 @@ export interface GraphicsSupport {
   webgl2: boolean
   extensions: string[]
   maxTextureSize: number
+  performance: {
+    score: number
+    capabilities: string[]
+  }
+  fallback: {
+    canvas2D: boolean
+    css3D: boolean
+  }
 }
 
 export interface StorageSupport {

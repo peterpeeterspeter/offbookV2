@@ -87,12 +87,6 @@ const nextConfig = {
     scrollRestoration: true,
   },
 
-  // Server configuration
-  server: {
-    host: "127.0.0.1",
-    port: 3333,
-  },
-
   webpack: (config, { isServer }) => {
     // Audio worklet support
     config.resolve.fallback = {
