@@ -4,13 +4,12 @@ import {
   AudioStateManager
 } from './audio-state';
 import { VADMetrics } from '../workers/vad.worker';
+import { ScriptAnalysisError, ScriptAnalysisErrorCode } from '../types/errors';
 
 // VAD Service Types
 export interface VADConfig {
   sampleRate: number;
-  bufferSize: number;
-  noiseThreshold: number;
-  silenceThreshold: number;
+  frameSize: number;
 }
 
 export interface VADState {
@@ -82,6 +81,8 @@ export class VADService {
   private config: VADConfig;
   private mediaStream: MediaStream | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private audioData: Float32Array | null = null;
+  private startTime: number = 0;
 
   constructor(config: VADConfig) {
     this.config = config;
@@ -520,5 +521,55 @@ export class VADService {
       this.audioContext = null;
     }
     this.mediaStream = null;
+  }
+
+  async startRecording(): Promise<void> {
+    this.audioData = new Float32Array(0);
+    this.startTime = Date.now();
+  }
+
+  async stopRecording(): Promise<{ audioData: Float32Array; duration: number }> {
+    if (!this.audioData) {
+      throw new ScriptAnalysisError({
+        code: ScriptAnalysisErrorCode.PROCESSING_FAILED,
+        message: 'No audio data available'
+      });
+    }
+
+    const duration = Date.now() - this.startTime;
+    return {
+      audioData: this.audioData,
+      duration
+    };
+  }
+
+  async processAudioChunk(chunk: Float32Array): Promise<boolean> {
+    if (!this.audioData) {
+      this.audioData = chunk;
+    } else {
+      const newData = new Float32Array(this.audioData.length + chunk.length);
+      newData.set(this.audioData);
+      newData.set(chunk, this.audioData.length);
+      this.audioData = newData;
+    }
+    return true;
+  }
+
+  calculateMetrics(audioData: Float32Array): VADMetrics {
+    let sum = 0;
+    let max = 0;
+
+    for (let i = 0; i < audioData.length; i++) {
+      const value = Math.abs(audioData[i]);
+      sum += value;
+      max = Math.max(max, value);
+    }
+
+    return {
+      averageAmplitude: sum / audioData.length,
+      peakAmplitude: max,
+      silenceRatio: 0,
+      processingTime: 0
+    };
   }
 }

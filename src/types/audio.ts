@@ -163,15 +163,9 @@ export interface AudioErrorDetails extends ServiceError {
 }
 
 export interface RecordingResult {
-  audioData: Float32Array;
+  audio: ArrayBuffer;
   duration: number;
-  hasVoice: boolean;
-  metrics?: {
-    averageAmplitude: number;
-    peakAmplitude: number;
-    silenceRatio: number;
-    processingTime: number;
-  };
+  format: string;
 }
 
 export interface TTSParams {
@@ -212,3 +206,23 @@ export const ERROR_RECOVERY_HINTS = {
   [AudioServiceError.BROWSER_UNSUPPORTED]: 'Your browser does not support required audio features. Try using a modern browser.',
   [AudioServiceError.MEMORY_EXCEEDED]: 'Memory limit exceeded. Try closing other tabs or applications.'
 } as const;
+
+export interface TTSRequest {
+  text: string;
+  voice?: string;
+  settings?: Record<string, any>;
+}
+
+export interface TTSMetrics {
+  latency: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface AudioServiceType {
+  startRecording: (sessionId: string) => Promise<void>;
+  stopRecording: (sessionId: string) => Promise<RecordingResult>;
+  initializeTTS: (sessionId: string, userRole: string) => Promise<void>;
+  generateSpeech: (params: TTSRequest) => Promise<ArrayBuffer>;
+  processAudioChunk: (sessionId: string, chunk: ArrayBuffer) => Promise<boolean>;
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { PerformanceAnalyzer } from '@/services/performance-analyzer'
-import type { AudioServiceType } from '@/components/SceneFlow'
+import type { AudioServiceType, RecordingResult } from '@/types/audio'
 import { ScriptAnalysisService } from '@/services/script-analysis'
 import type { PerformanceMetrics, StreamingMetrics } from '@/types/streaming'
 import { AudioService } from '@/services/audio-service'
@@ -14,8 +14,7 @@ describe('Load Testing Suite', () => {
 
   beforeEach(async () => {
     analyzer = new PerformanceAnalyzer()
-    audioService = AudioService
-    await audioService.setup()
+    audioService = AudioService.getInstance()
     scriptService = new ScriptAnalysisService(audioService)
     collaborationService = CollaborationService.getInstance()
     collaborationService.reset()
@@ -115,11 +114,18 @@ describe('Load Testing Suite', () => {
 
   describe('Load Testing', () => {
     it('should handle concurrent recording sessions', async () => {
-      const sessionId = `load-test-${Date.now()}`;
-      await audioService.startRecording(sessionId);
-      // Test logic
-      await audioService.stopRecording(sessionId);
-    });
+      const sessions = Array.from({ length: 5 }, () => crypto.randomUUID())
+      const recordings = []
+
+      for (const sessionId of sessions) {
+        await audioService.startRecording(sessionId)
+        recordings.push(audioService.stopRecording(sessionId))
+      }
+
+      const results = await Promise.all(recordings)
+      expect(results.length).toBe(5)
+      expect(results.every(r => r.duration > 0)).toBe(true)
+    })
 
     it('should handle high volume of audio data', async () => {
       const sessionId = `volume-test-${Date.now()}`;

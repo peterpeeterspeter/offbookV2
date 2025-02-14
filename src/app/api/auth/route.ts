@@ -7,7 +7,7 @@ if (!process.env.AUTH_API_URL) {
 }
 
 const authService = new AuthService({
-  endpoint: process.env.AUTH_API_URL
+  endpoint: process.env.AUTH_API_URL || '' // Provide empty string as fallback
 });
 
 export async function POST(request: Request) {

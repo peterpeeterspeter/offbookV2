@@ -6,7 +6,7 @@ export async function POST() {
   try {
     // Initialize auth service
     const authService = new AuthService({
-      endpoint: process.env.AUTH_API_URL
+      endpoint: process.env.AUTH_API_URL || ''
     });
 
     try {
@@ -18,8 +18,7 @@ export async function POST() {
       if (token) {
         // Notify auth service about logout
         await authService.authenticate({
-          type: 'logout',
-          credentials: { token }
+          type: 'logout'
         });
       }
     } catch (error) {
@@ -27,8 +26,9 @@ export async function POST() {
       // Continue with cookie cleanup even if auth service fails
     }
 
-    // Clear the auth cookie
+    // Clear the auth cookies
     cookies().delete('auth-token');
+    cookies().delete('refresh-token');
 
     return NextResponse.json({
       message: 'Logged out successfully'
