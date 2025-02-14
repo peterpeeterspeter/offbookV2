@@ -61,7 +61,7 @@ export interface MonitoringConfig {
     enabled: boolean
     maxErrors: number
     reportingEndpoint?: string
-    ignoredErrors?: string[]
+    ignoredErrors: string[]
   }
   performance: {
     enabled: boolean
@@ -71,6 +71,13 @@ export interface MonitoringConfig {
       memory: number
       cpu: number
       latency: number
+      fcp: number
+      lcp: number
+      cls: number
+      fid: number
+      ttfb: number
+      audioLatency: number
+      batteryDrain: number
     }
   }
   health: {
@@ -78,6 +85,30 @@ export interface MonitoringConfig {
     checkInterval: number
     endpoints: string[]
   }
+  logging: {
+    enabled: boolean
+    level: 'debug' | 'info' | 'warn' | 'error'
+    format: 'json' | 'text'
+    retention: number
+    remoteEndpoint?: string
+    batchSize: number
+    batchInterval: number
+  }
+}
+
+export interface ErrorSeverityThresholds {
+  memory: SeverityLevels
+  cpu: SeverityLevels
+  errorRate: SeverityLevels
+  latency: SeverityLevels
+  batteryDrain: SeverityLevels
+}
+
+interface SeverityLevels {
+  critical: number
+  high: number
+  medium: number
+  low: number
 }
 
 export interface Alert {

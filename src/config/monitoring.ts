@@ -27,9 +27,16 @@ export const monitoringConfig: MonitoringConfig = {
       'batteryLevel'
     ],
     thresholds: {
-      memory: 256 * 1024 * 1024, // 256MB
-      cpu: 80, // 80%
-      latency: 200 // 200ms
+      memory: 256 * 1024 * 1024, // 256MB as per deployment checklist
+      cpu: 80, // 80% threshold
+      latency: 150, // 150ms target from deployment checklist
+      fcp: 1000, // 1s First Contentful Paint
+      lcp: 1800, // 1.8s Largest Contentful Paint from checklist
+      cls: 0.1, // Cumulative Layout Shift
+      fid: 100, // First Input Delay
+      ttfb: 200, // Time to First Byte
+      audioLatency: 100, // Audio processing latency
+      batteryDrain: 8 // 8% per hour as per checklist
     }
   },
   health: {
@@ -41,29 +48,48 @@ export const monitoringConfig: MonitoringConfig = {
       '/health/collaboration',
       '/health/storage'
     ]
+  },
+  logging: {
+    enabled: true,
+    level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+    format: 'json',
+    retention: 90, // 90 days
+    remoteEndpoint: process.env.LOG_REMOTE_ENDPOINT,
+    batchSize: 100,
+    batchInterval: 5000 // 5 seconds
   }
 }
 
 export const ERROR_SEVERITY_THRESHOLDS = {
   memory: {
-    high: 0.9, // 90% of max
-    medium: 0.7, // 70% of max
-    low: 0.5 // 50% of max
+    critical: 0.95, // 95% of max
+    high: 0.85, // 85% of max
+    medium: 0.75, // 75% of max
+    low: 0.6 // 60% of max
   },
   cpu: {
+    critical: 0.9, // 90% utilization
     high: 0.8, // 80% utilization
-    medium: 0.6,
-    low: 0.4
+    medium: 0.7, // 70% utilization
+    low: 0.5 // 50% utilization
   },
   errorRate: {
-    high: 0.05, // 5% error rate
-    medium: 0.01,
-    low: 0.001
+    critical: 0.05, // 5% error rate
+    high: 0.03, // 3% error rate
+    medium: 0.01, // 1% error rate
+    low: 0.005 // 0.5% error rate
   },
   latency: {
+    critical: 1000, // 1s
     high: 500, // 500ms
-    medium: 200,
-    low: 100
+    medium: 200, // 200ms
+    low: 100 // 100ms
+  },
+  batteryDrain: {
+    critical: 15, // 15% per hour
+    high: 12, // 12% per hour
+    medium: 10, // 10% per hour
+    low: 8 // 8% per hour (target)
   }
 }
 
