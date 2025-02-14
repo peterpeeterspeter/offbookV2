@@ -1,6 +1,6 @@
 import { Alert, ErrorReport, ErrorSeverity, PerformanceAlert, HealthAlert, ServiceStatus } from '@/types/monitoring';
 import { loggingService } from './logging-service';
-import { ERROR_SEVERITY_THRESHOLDS } from '@/config/monitoring';
+import { ERROR_SEVERITY_THRESHOLDS, monitoringConfig } from '@/config/monitoring';
 
 // Define error types as const to use as values
 const ERROR_TYPES = {
@@ -40,148 +40,134 @@ export class AlertService {
     this.errorCounts.set(error.type, currentCount + 1);
 
     // Calculate error rate and determine severity
-    const severity = this.calculateErrorSeverity(error.type);
+    const calculatedSeverity = this.calculateErrorSeverity(error.type);
 
-    // Create alert if severity is high enough
-    if (severity === 'high' || severity === 'critical') {
-      this.createAlert({
-        type: 'error',
-        message: `High error rate detected for ${error.type}: ${error.message}`,
-        severity,
-        timestamp: Date.now(),
-        context: {
-          errorType: error.type,
-          errorCount: currentCount + 1,
-          errorStack: error.stack,
-          ...error.context
-        }
-      });
-    }
+    // Create alert for all errors
+    this.createAlert({
+      type: 'error',
+      message: `Error detected for ${error.type}: ${error.message}`,
+      severity: error.severity || calculatedSeverity, // Use provided severity or calculated one
+      timestamp: Date.now(),
+      context: {
+        errorType: error.type,
+        errorCount: currentCount + 1,
+        errorStack: error.stack,
+        ...error.context
+      }
+    });
 
     // Log the error
     loggingService.error(error.message, new Error(error.stack), {
       type: error.type,
-      severity,
+      severity: error.severity || calculatedSeverity,
       context: error.context
     });
   }
 
   public trackPerformanceAlert(metric: string, value: number, threshold: number): void {
-    const severity = this.calculatePerformanceSeverity(metric, value, threshold);
-
-    if (severity === 'high' || severity === 'critical') {
-      const alert: PerformanceAlert = {
-        type: 'performance',
-        message: `Performance threshold exceeded for ${metric}`,
-        severity,
-        timestamp: Date.now(),
-        metric,
-        value,
-        threshold,
-        trend: this.calculateTrend(metric, value)
-      };
-
-      this.createAlert(alert);
-    }
+    const severity = this.calculatePerformanceSeverity(value, threshold);
+    const alert: PerformanceAlert = {
+      type: 'performance',
+      message: `Performance alert: ${metric} exceeded threshold (${value} > ${threshold})`,
+      severity,
+      timestamp: Date.now(),
+      metric,
+      value,
+      threshold
+    };
+    this.createAlert(alert);
   }
 
   public trackHealthAlert(service: string, status: ServiceStatus, previousStatus?: ServiceStatus): void {
-    if (status === 'degraded' || status === 'unhealthy') {
-      const alert: HealthAlert = {
-        type: 'health',
-        message: `Service ${service} is ${status}`,
-        severity: status === 'unhealthy' ? 'critical' : 'high',
-        timestamp: Date.now(),
-        service,
-        status,
-        previousStatus,
-        recoverySteps: this.getRecoverySteps(service, status)
-      };
-
-      this.createAlert(alert);
-    }
-  }
-
-  private createAlert(alert: Alert): void {
-    // Check alert cooldown
-    const lastAlert = this.lastAlertTime.get(alert.type);
-    if (lastAlert && Date.now() - lastAlert < this.ALERT_COOLDOWN) {
-      return;
-    }
-
-    // Add alert to the list
-    this.alerts.push(alert);
-    this.lastAlertTime.set(alert.type, Date.now());
-
-    // Log alert
-    loggingService.warn(`Alert triggered: ${alert.message}`, {
-      alertType: alert.type,
-      severity: alert.severity,
-      context: alert.context
-    });
-
-    // Send notifications if needed
-    this.notifyAlert(alert);
+    const alert: HealthAlert = {
+      type: 'health',
+      message: `Service ${service} status changed to ${status}${previousStatus ? ` from ${previousStatus}` : ''}`,
+      severity: status === 'unhealthy' ? 'critical' : status === 'degraded' ? 'high' : 'low',
+      timestamp: Date.now(),
+      service,
+      status,
+      previousStatus,
+      recoverySteps: this.getRecoverySteps(service, status)
+    };
+    this.createAlert(alert);
   }
 
   private calculateErrorSeverity(type: ErrorType): ErrorSeverity {
     const count = this.errorCounts.get(type) || 0;
-    const rate = count / this.getTimeWindow();
+    const thresholds = ERROR_SEVERITY_THRESHOLDS.errorRate;
 
-    if (rate >= ERROR_SEVERITY_THRESHOLDS.errorRate.high) {
-      return 'critical';
-    } else if (rate >= ERROR_SEVERITY_THRESHOLDS.errorRate.medium) {
-      return 'high';
-    } else if (rate >= ERROR_SEVERITY_THRESHOLDS.errorRate.low) {
-      return 'medium';
-    }
+    // Calculate error rate as a percentage (0-1)
+    const errorRate = count / monitoringConfig.errorTracking.maxErrors;
+
+    // Compare error rate against thresholds
+    if (errorRate >= thresholds.critical) return 'critical';
+    if (errorRate >= thresholds.high) return 'high';
+    if (errorRate >= thresholds.medium) return 'medium';
     return 'low';
   }
 
-  private calculatePerformanceSeverity(metric: string, value: number, threshold: number): ErrorSeverity {
+  private calculatePerformanceSeverity(value: number, threshold: number): ErrorSeverity {
+    // Calculate ratio of value to threshold
     const ratio = value / threshold;
 
-    if (ratio >= ERROR_SEVERITY_THRESHOLDS.memory.high) {
-      return 'critical';
-    } else if (ratio >= ERROR_SEVERITY_THRESHOLDS.memory.medium) {
-      return 'high';
-    } else if (ratio >= ERROR_SEVERITY_THRESHOLDS.memory.low) {
-      return 'medium';
+    // Define severity thresholds based on ratio
+    if (ratio >= 5.0) return 'critical';  // 5x threshold
+    if (ratio >= 2.0) return 'high';      // 2x threshold
+    if (ratio >= 1.0) return 'medium';    // At threshold
+    return 'low';                         // Below threshold
+  }
+
+  private createAlert(alert: Alert): void {
+    const alertKey = `${alert.type}-${alert.severity}`;
+    const lastAlertTime = this.lastAlertTime.get(alertKey) || 0;
+    const now = Date.now();
+
+    // Check if we're still in cooldown period
+    if (now - lastAlertTime < this.ALERT_COOLDOWN) {
+      return;
     }
-    return 'low';
+
+    this.alerts.push(alert);
+    this.lastAlertTime.set(alertKey, now);
+
+    // Trim old alerts if we have too many
+    if (this.alerts.length > monitoringConfig.errorTracking.maxErrors) {
+      this.alerts = this.alerts.slice(-monitoringConfig.errorTracking.maxErrors);
+    }
   }
 
-  private calculateTrend(_metric: string, _value: number): 'increasing' | 'decreasing' | 'stable' {
-    // Implementation for trend calculation
-    // This would compare with historical values
-    return 'stable';
-  }
+  private getRecoverySteps(service: string, status: ServiceStatus): string[] {
+    if (status === 'healthy') return [];
 
-  private getTimeWindow(): number {
-    return 60 * 60 * 1000; // 1 hour in milliseconds
-  }
-
-  private getRecoverySteps(service: string, _status: ServiceStatus): string[] {
-    // Implementation for getting recovery steps based on service and status
-    return [
-      `Check ${service} logs for errors`,
+    const commonSteps = [
+      'Check service logs for errors',
       'Verify service dependencies are available',
-      'Check system resources',
-      'Restart service if necessary'
+      'Check system resources (CPU, memory, disk)'
     ];
+
+    const serviceSpecificSteps: Record<string, string[]> = {
+      api: [
+        'Check API endpoint health',
+        'Verify database connectivity',
+        'Check authentication service'
+      ],
+      audio: [
+        'Check audio device permissions',
+        'Verify audio processing pipeline',
+        'Check WebRTC connection'
+      ],
+      storage: [
+        'Check storage quota',
+        'Verify file system permissions',
+        'Run storage cleanup routine'
+      ]
+    };
+
+    return [...commonSteps, ...(serviceSpecificSteps[service] || [])];
   }
 
-  private async notifyAlert(alert: Alert): Promise<void> {
-    // Implementation for sending notifications (email, Slack, etc.)
-    // This would be implemented based on your notification preferences
-    console.log('Alert notification:', alert);
-  }
-
-  public getAlerts(severity?: ErrorSeverity): Alert[] {
-    if (severity) {
-      return this.alerts.filter(alert => alert.severity === severity);
-    }
-    return this.alerts;
+  public getAlerts(): Alert[] {
+    return [...this.alerts];
   }
 
   public clearAlerts(): void {

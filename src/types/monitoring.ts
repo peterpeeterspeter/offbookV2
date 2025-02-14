@@ -62,6 +62,12 @@ export interface MonitoringConfig {
     maxErrors: number
     reportingEndpoint?: string
     ignoredErrors: string[]
+    severityThresholds: {
+      critical: number
+      high: number
+      medium: number
+      low: number
+    }
   }
   performance: {
     enabled: boolean

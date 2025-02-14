@@ -10,7 +10,13 @@ export const monitoringConfig: MonitoringConfig = {
     ignoredErrors: [
       'ResizeObserver loop limit exceeded',
       'ResizeObserver loop completed with undelivered notifications'
-    ]
+    ],
+    severityThresholds: {
+      critical: 0.1, // 10% error rate
+      high: 0.05,    // 5% error rate
+      medium: 0.01,  // 1% error rate
+      low: 0.001     // 0.1% error rate
+    }
   },
   performance: {
     enabled: true,

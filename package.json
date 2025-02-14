@@ -17,7 +17,10 @@
     "format": "prettier --write .",
     "prepare": "husky install",
     "health-check": "node scripts/health-check.js",
-    "monitor": "node scripts/monitor.js"
+    "monitor": "node scripts/monitor.js",
+    "logs:manage": "node scripts/log-management.js",
+    "logs:rotate": "node scripts/log-management.js rotate",
+    "logs:cleanup": "node scripts/log-management.js cleanup"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.7.0",
@@ -34,18 +37,21 @@
     "clsx": "^2.1.1",
     "critters": "^0.0.16",
     "crypto-js": "^4.2.0",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "framer-motion": "^12.4.2",
     "http-proxy-middleware": "^3.0.3",
     "lucide-react": "^0.475.0",
     "next": "14.0.4",
     "next-themes": "^0.2.1",
+    "node-audiorecorder": "^3.0.0",
     "opentelemetry": "^0.1.0",
     "pino": "^8.17.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "swr": "^2.2.4",
     "tailwind-merge": "^3.0.1",
+    "web-audio-api": "^0.2.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {

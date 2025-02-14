@@ -1,41 +1,73 @@
-const { logger } = require('./monitor');
+require("dotenv").config({ path: ".env.local" });
+const { logger } = require("./monitor");
 
 async function checkAudioSystem() {
   try {
-    // Check if AudioContext is available
-    if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') {
-      throw new Error('AudioContext not supported');
+    // In Node.js environment, we'll check if the required audio packages are available
+    const audioPackages = ["node-audiorecorder", "web-audio-api"];
+    const missingPackages = [];
+
+    for (const pkg of audioPackages) {
+      try {
+        require.resolve(pkg);
+      } catch (e) {
+        missingPackages.push(pkg);
+      }
     }
-    return { status: 'healthy', details: 'Audio system available' };
+
+    if (missingPackages.length > 0) {
+      return {
+        status: "warning",
+        details: `Missing optional audio packages: ${missingPackages.join(", ")}`,
+      };
+    }
+
+    return {
+      status: "healthy",
+      details: "Audio system dependencies available",
+    };
   } catch (error) {
-    return { status: 'unhealthy', details: error.message };
+    return { status: "unhealthy", details: error.message };
   }
 }
 
 async function checkApiEndpoints() {
   const endpoints = {
-    whisper: process.env.WHISPER_API_ENDPOINT,
-    elevenlabs: process.env.ELEVENLABS_API_ENDPOINT,
-    emotion: process.env.EMOTION_API_ENDPOINT
+    whisper: process.env.WHISPER_API_URL,
+    elevenlabs: process.env.ELEVENLABS_API_URL,
+    emotion: process.env.EMOTION_API_URL,
   };
 
   const results = {};
 
   for (const [name, url] of Object.entries(endpoints)) {
     try {
+      if (!url) {
+        results[name] = {
+          status: "warning",
+          error: `${name.toUpperCase()}_API_URL not configured`,
+        };
+        continue;
+      }
+
       const start = Date.now();
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        method: "HEAD",
+        headers: {
+          Authorization: `Bearer ${process.env[`${name.toUpperCase()}_API_KEY`]}`,
+        },
+      });
       const latency = Date.now() - start;
 
       results[name] = {
-        status: response.ok ? 'healthy' : 'unhealthy',
+        status: response.ok ? "healthy" : "unhealthy",
         latency,
-        statusCode: response.status
+        statusCode: response.status,
       };
     } catch (error) {
       results[name] = {
-        status: 'unhealthy',
-        error: error.message
+        status: "unhealthy",
+        error: error.message,
       };
     }
   }
@@ -48,12 +80,12 @@ async function checkResources() {
   const maxHeapSize = 1024 * 1024 * 1024; // 1GB
 
   return {
-    status: used.heapUsed < maxHeapSize ? 'healthy' : 'warning',
+    status: used.heapUsed < maxHeapSize ? "healthy" : "warning",
     memory: {
       heapUsed: Math.round(used.heapUsed / 1024 / 1024),
       heapTotal: Math.round(used.heapTotal / 1024 / 1024),
-      rss: Math.round(used.rss / 1024 / 1024)
-    }
+      rss: Math.round(used.rss / 1024 / 1024),
+    },
   };
 }
 
@@ -62,32 +94,45 @@ async function runHealthCheck() {
     const [audioStatus, apiStatus, resourceStatus] = await Promise.all([
       checkAudioSystem(),
       checkApiEndpoints(),
-      checkResources()
+      checkResources(),
     ]);
 
     const healthStatus = {
       timestamp: new Date().toISOString(),
-      status: 'healthy',
+      status: "healthy",
       checks: {
         audio: audioStatus,
         api: apiStatus,
-        resources: resourceStatus
-      }
+        resources: resourceStatus,
+      },
     };
 
     // Determine overall status
-    if (audioStatus.status === 'unhealthy' ||
-        Object.values(apiStatus).some(api => api.status === 'unhealthy') ||
-        resourceStatus.status === 'unhealthy') {
-      healthStatus.status = 'unhealthy';
-    } else if (resourceStatus.status === 'warning') {
-      healthStatus.status = 'warning';
+    const apiUnhealthy = Object.values(apiStatus).some(
+      (api) => api.status === "unhealthy"
+    );
+    const apiWarning = Object.values(apiStatus).some(
+      (api) => api.status === "warning"
+    );
+
+    if (
+      audioStatus.status === "unhealthy" ||
+      apiUnhealthy ||
+      resourceStatus.status === "unhealthy"
+    ) {
+      healthStatus.status = "unhealthy";
+    } else if (
+      audioStatus.status === "warning" ||
+      apiWarning ||
+      resourceStatus.status === "warning"
+    ) {
+      healthStatus.status = "warning";
     }
 
-    logger.info('Health check completed', healthStatus);
+    logger.info("Health check completed", healthStatus);
     return healthStatus;
   } catch (error) {
-    logger.error('Health check failed', error);
+    logger.error("Health check failed", error);
     throw error;
   }
 }
@@ -95,12 +140,12 @@ async function runHealthCheck() {
 // Run health check if called directly
 if (require.main === module) {
   runHealthCheck()
-    .then(status => {
+    .then((status) => {
       console.log(JSON.stringify(status, null, 2));
-      process.exit(status.status === 'healthy' ? 0 : 1);
+      process.exit(status.status === "healthy" ? 0 : 1);
     })
-    .catch(error => {
-      console.error('Health check failed:', error);
+    .catch((error) => {
+      console.error("Health check failed:", error);
       process.exit(1);
     });
 }
@@ -109,5 +154,5 @@ module.exports = {
   runHealthCheck,
   checkAudioSystem,
   checkApiEndpoints,
-  checkResources
+  checkResources,
 };

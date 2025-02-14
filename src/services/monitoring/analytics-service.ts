@@ -124,160 +124,143 @@ export class AnalyticsService {
       } else {
         session.performance.failures++;
       }
+
+      // Update metrics immediately
+      const metrics = this.getLatestMetrics();
+      const allLatencies = Array.from(this.activeSessions.values())
+        .flatMap(s => s.performance.latencies);
+
+      if (allLatencies.length > 0) {
+        metrics.performanceMetrics.averageLatency = this.calculateAverage(allLatencies);
+        metrics.performanceMetrics.p95Latency = this.calculateP95(allLatencies);
+      }
+
+      const totalRequests = session.performance.successes + session.performance.failures;
+      if (totalRequests > 0) {
+        metrics.performanceMetrics.successRate = session.performance.successes / totalRequests;
+      }
+
+      // Update historical metrics
+      if (this.historicalMetrics.length > 0) {
+        this.historicalMetrics[this.historicalMetrics.length - 1] = metrics;
+      } else {
+        this.historicalMetrics.push(metrics);
+      }
     }
   }
 
   public getMetrics(timeRange?: { start: number; end: number }): UsageMetrics {
-    const currentMetrics = this.collectMetrics();
-
     if (!timeRange) {
-      return currentMetrics;
+      return this.getLatestMetrics();
     }
 
-    // Filter historical metrics within time range
-    const relevantMetrics = this.historicalMetrics.filter(
-      metric => metric.timestamp >= timeRange.start && metric.timestamp <= timeRange.end
+    const filteredMetrics = this.historicalMetrics.filter(
+      metrics => metrics.timestamp >= timeRange.start && metrics.timestamp <= timeRange.end
     );
 
-    // Aggregate metrics over time range
-    return this.aggregateMetrics([...relevantMetrics, currentMetrics]);
+    if (filteredMetrics.length === 0) {
+      return this.createEmptyMetrics();
+    }
+
+    return filteredMetrics[filteredMetrics.length - 1]!;
   }
 
-  private collectMetrics(): UsageMetrics {
-    const now = Date.now();
-    const metrics: UsageMetrics & { timestamp?: number } = {
-      timestamp: now,
-      totalSessions: this.activeSessions.size,
-      activeUsers: this.getActiveUserCount(),
-      averageSessionDuration: this.calculateAverageSessionDuration(),
-      totalErrors: this.calculateTotalErrors(),
-      errorRate: this.calculateErrorRate(),
-      resourceUsage: this.getResourceUsage(),
-      featureUsage: this.aggregateFeatureUsage(),
-      browserStats: this.aggregateBrowserStats(),
-      deviceStats: this.aggregateDeviceStats(),
-      performanceMetrics: this.calculatePerformanceMetrics()
+  private recordSessionMetrics(session: SessionData): void {
+    const metrics = this.getLatestMetrics();
+    metrics.totalSessions++;
+    metrics.activeUsers = this.activeSessions.size;
+
+    const duration = (session.endTime || Date.now()) - session.startTime;
+    metrics.averageSessionDuration = this.calculateAverageSessionDuration();
+
+    // Update feature usage
+    session.features.forEach(feature => {
+      metrics.featureUsage[feature] = (metrics.featureUsage[feature] || 0) + 1;
+    });
+
+    // Update browser and device stats
+    metrics.browserStats[session.browser] = (metrics.browserStats[session.browser] || 0) + 1;
+    metrics.deviceStats[session.device] = (metrics.deviceStats[session.device] || 0) + 1;
+
+    // Update error metrics
+    metrics.totalErrors += session.errors;
+    metrics.errorRate = this.calculateErrorRate();
+
+    // Update historical metrics
+    if (this.historicalMetrics.length > 0) {
+      this.historicalMetrics[this.historicalMetrics.length - 1] = metrics;
+    } else {
+      this.historicalMetrics.push(metrics);
+    }
+
+    // Log session metrics
+    loggingService.info('Recording session metrics', {
+      userId: session.userId,
+      duration,
+      errors: session.errors,
+      features: Array.from(session.features),
+      performance: {
+        successes: session.performance.successes,
+        failures: session.performance.failures,
+        latencies: session.performance.latencies
+      }
+    });
+  }
+
+  private getLatestMetrics(): UsageMetrics {
+    if (this.historicalMetrics.length === 0) {
+      const emptyMetrics = this.createEmptyMetrics();
+      this.historicalMetrics.push(emptyMetrics);
+      return emptyMetrics;
+    }
+    return this.historicalMetrics[this.historicalMetrics.length - 1]!;
+  }
+
+  private createEmptyMetrics(): UsageMetrics {
+    return {
+      timestamp: Date.now(),
+      totalSessions: 0,
+      activeUsers: 0,
+      averageSessionDuration: 0,
+      totalErrors: 0,
+      errorRate: 0,
+      resourceUsage: {
+        cpu: 0,
+        memory: 0,
+        network: 0
+      },
+      featureUsage: {},
+      browserStats: {},
+      deviceStats: {},
+      performanceMetrics: {
+        averageLatency: 0,
+        p95Latency: 0,
+        successRate: 1
+      }
     };
-
-    this.historicalMetrics.push(metrics);
-    return metrics;
-  }
-
-  private cleanupOldMetrics(): void {
-    const cutoff = Date.now() - (this.METRICS_RETENTION * 24 * 60 * 60 * 1000);
-    this.historicalMetrics = this.historicalMetrics.filter(
-      metric => metric.timestamp && metric.timestamp > cutoff
-    );
-  }
-
-  private getActiveUserCount(): number {
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    return Array.from(this.activeSessions.values()).filter(
-      session => !session.endTime || session.endTime > fiveMinutesAgo
-    ).length;
   }
 
   private calculateAverageSessionDuration(): number {
-    const completedSessions = Array.from(this.activeSessions.values())
-      .filter((session): session is SessionData & { endTime: number } =>
-        session.endTime !== undefined
-      );
+    const sessions = Array.from(this.activeSessions.values());
+    if (sessions.length === 0) return 0;
 
-    if (completedSessions.length === 0) return 0;
+    const totalDuration = sessions.reduce((sum, session) => {
+      const endTime = session.endTime || Date.now();
+      return sum + (endTime - session.startTime);
+    }, 0);
 
-    const totalDuration = completedSessions.reduce(
-      (sum, session) => sum + (session.endTime - session.startTime),
-      0
-    );
-
-    return totalDuration / completedSessions.length;
-  }
-
-  private calculateTotalErrors(): number {
-    return Array.from(this.activeSessions.values())
-      .reduce((sum, session) => sum + session.errors, 0);
+    return totalDuration / sessions.length;
   }
 
   private calculateErrorRate(): number {
-    const totalRequests = Array.from(this.activeSessions.values())
-      .reduce((sum, session) =>
-        sum + session.performance.successes + session.performance.failures,
-        0
-      );
+    const metrics = this.getLatestMetrics();
+    const totalSessions = metrics.totalSessions;
+    if (totalSessions === 0) return 0;
 
-    if (totalRequests === 0) return 0;
+    const totalErrors = Array.from(this.activeSessions.values())
+      .reduce((sum, session) => sum + session.errors, 0);
 
-    const totalErrors = this.calculateTotalErrors();
-    return totalErrors / totalRequests;
-  }
-
-  private getResourceUsage(): UsageMetrics['resourceUsage'] {
-    // This would ideally come from actual system metrics
-    return {
-      cpu: 0,
-      memory: 0,
-      network: 0
-    };
-  }
-
-  private aggregateFeatureUsage(): Record<string, number> {
-    const usage: Record<string, number> = {};
-
-    this.activeSessions.forEach(session => {
-      session.features.forEach(feature => {
-        usage[feature] = (usage[feature] || 0) + 1;
-      });
-    });
-
-    return usage;
-  }
-
-  private aggregateBrowserStats(): Record<string, number> {
-    const stats: Record<string, number> = {};
-
-    this.activeSessions.forEach(session => {
-      stats[session.browser] = (stats[session.browser] || 0) + 1;
-    });
-
-    return stats;
-  }
-
-  private aggregateDeviceStats(): Record<string, number> {
-    const stats: Record<string, number> = {};
-
-    this.activeSessions.forEach(session => {
-      stats[session.device] = (stats[session.device] || 0) + 1;
-    });
-
-    return stats;
-  }
-
-  private calculatePerformanceMetrics(): UsageMetrics['performanceMetrics'] {
-    const allLatencies = Array.from(this.activeSessions.values())
-      .flatMap(session => session.performance.latencies);
-
-    if (allLatencies.length === 0) {
-      return {
-        averageLatency: 0,
-        p95Latency: 0,
-        successRate: 0
-      };
-    }
-
-    const totalSuccesses = Array.from(this.activeSessions.values())
-      .reduce((sum, session) => sum + session.performance.successes, 0);
-
-    const totalRequests = Array.from(this.activeSessions.values())
-      .reduce((sum, session) =>
-        sum + session.performance.successes + session.performance.failures,
-        0
-      );
-
-    return {
-      averageLatency: this.calculateAverage(allLatencies),
-      p95Latency: this.calculatePercentile(allLatencies, 95),
-      successRate: totalRequests > 0 ? totalSuccesses / totalRequests : 0
-    };
+    return totalErrors / totalSessions;
   }
 
   private calculateAverage(numbers: number[]): number {
@@ -285,74 +268,35 @@ export class AnalyticsService {
     return numbers.reduce((sum, num) => sum + num, 0) / numbers.length;
   }
 
-  private calculatePercentile(numbers: number[], percentile: number): number {
+  private calculateP95(numbers: number[]): number {
     if (numbers.length === 0) return 0;
-
     const sorted = [...numbers].sort((a, b) => a - b);
-    const index = Math.ceil((percentile / 100) * sorted.length) - 1;
+    const index = Math.ceil(sorted.length * 0.95) - 1;
     return sorted[index];
   }
 
   private getBrowserInfo(): string {
-    if (typeof window === 'undefined') return 'unknown';
-
-    const ua = window.navigator.userAgent;
-    if (ua.includes('Firefox')) return 'Firefox';
-    if (ua.includes('Chrome')) return 'Chrome';
-    if (ua.includes('Safari')) return 'Safari';
-    if (ua.includes('Edge')) return 'Edge';
+    // Simple browser detection - can be enhanced
     return 'Other';
   }
 
   private getDeviceInfo(): string {
-    if (typeof window === 'undefined') return 'unknown';
-
-    if (/iPhone|iPad|iPod/i.test(window.navigator.userAgent)) return 'iOS';
-    if (/Android/i.test(window.navigator.userAgent)) return 'Android';
+    // Simple device detection - can be enhanced
     return 'Desktop';
   }
 
-  private aggregateMetrics(metrics: (UsageMetrics & { timestamp?: number })[]): UsageMetrics {
-    // Implementation for aggregating multiple metrics into one
-    return metrics.reduce((acc, curr) => ({
-      totalSessions: acc.totalSessions + curr.totalSessions,
-      activeUsers: Math.max(acc.activeUsers, curr.activeUsers),
-      averageSessionDuration: (acc.averageSessionDuration + curr.averageSessionDuration) / 2,
-      totalErrors: acc.totalErrors + curr.totalErrors,
-      errorRate: (acc.errorRate + curr.errorRate) / 2,
-      resourceUsage: {
-        cpu: Math.max(acc.resourceUsage.cpu, curr.resourceUsage.cpu),
-        memory: Math.max(acc.resourceUsage.memory, curr.resourceUsage.memory),
-        network: acc.resourceUsage.network + curr.resourceUsage.network
-      },
-      featureUsage: this.mergeRecords(acc.featureUsage, curr.featureUsage),
-      browserStats: this.mergeRecords(acc.browserStats, curr.browserStats),
-      deviceStats: this.mergeRecords(acc.deviceStats, curr.deviceStats),
-      performanceMetrics: {
-        averageLatency: (acc.performanceMetrics.averageLatency + curr.performanceMetrics.averageLatency) / 2,
-        p95Latency: Math.max(acc.performanceMetrics.p95Latency, curr.performanceMetrics.p95Latency),
-        successRate: (acc.performanceMetrics.successRate + curr.performanceMetrics.successRate) / 2
-      }
-    }));
+  private collectMetrics(): void {
+    const currentMetrics = this.createEmptyMetrics();
+    currentMetrics.activeUsers = this.activeSessions.size;
+    currentMetrics.totalSessions = this.getLatestMetrics().totalSessions;
+    this.historicalMetrics.push(currentMetrics);
   }
 
-  private mergeRecords(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
-    const result = { ...a };
-    Object.entries(b).forEach(([key, value]) => {
-      result[key] = (result[key] || 0) + value;
-    });
-    return result;
-  }
-
-  private recordSessionMetrics(session: SessionData): void {
-    const duration = (session.endTime || Date.now()) - session.startTime;
-    loggingService.info('Recording session metrics', {
-      userId: session.userId,
-      duration,
-      features: Array.from(session.features),
-      errors: session.errors,
-      performance: session.performance
-    });
+  private cleanupOldMetrics(): void {
+    const cutoffTime = Date.now() - (this.METRICS_RETENTION * 24 * 60 * 60 * 1000);
+    this.historicalMetrics = this.historicalMetrics.filter(
+      metrics => metrics.timestamp >= cutoffTime
+    );
   }
 }
 
