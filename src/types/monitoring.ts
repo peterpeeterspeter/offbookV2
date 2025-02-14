@@ -12,25 +12,30 @@ export interface ErrorReport {
 }
 
 export interface PerformanceMetrics {
-  type: string
-  name: string
-  duration: number
-  timestamp: number
-  context?: {
-    memory?: {
-      heapUsed: number
-      heapTotal: number
-    }
-    cpu?: {
-      usage: number
-      cores: number
-    }
-    network?: {
-      downlink: number
-      rtt: number
-      effectiveType: string
-    }
-  }
+  audio: {
+    latency: number;
+    sampleRate: number;
+    bufferSize: number;
+    underruns: number;
+    overruns: number;
+  };
+  network: {
+    wsLatency: number;
+    bandwidth: number;
+    packetLoss: number;
+    reconnects: number;
+  };
+  memory: {
+    heapUsed: number;
+    heapTotal: number;
+    external: number;
+    gcCount: number;
+  };
+  timing: {
+    ttfb: number;
+    processingTime: number;
+    renderTime: number;
+  };
 }
 
 export interface HealthStatus {
@@ -158,4 +163,47 @@ export interface MonitoringFeatures {
   enableHistoricalAnalysis: boolean
   enableAnomalyDetection: boolean
   enableAutomaticRecovery: boolean
+}
+
+export interface ResourceUsage {
+  memoryPercent: number;
+  connections: number;
+  queueSize: number;
+  activeWorkers: number;
+  cpuUsage: number;
+}
+
+export interface PerformanceEvent {
+  timestamp: number;
+  type: 'audio' | 'network' | 'memory' | 'error';
+  metrics: Partial<PerformanceMetrics>;
+  resources?: ResourceUsage;
+  error?: {
+    message: string;
+    code: string;
+    stack?: string;
+  };
+}
+
+export type ThermalState = 'nominal' | 'fair' | 'serious' | 'critical';
+
+export interface DeviceMetrics {
+  battery: {
+    level: number;
+    charging: boolean;
+    chargingTime: number;
+    dischargingTime: number;
+  };
+  thermal: {
+    state: ThermalState;
+  };
+  memory: {
+    deviceMemory?: number;
+    jsHeapSizeLimit?: number;
+  };
+  hardware: {
+    concurrency: number;
+    platform: string;
+    mobile: boolean;
+  };
 }
