@@ -1,7 +1,21 @@
 import { BrowserFeatures, CompatibilityReport, WebRTCSupport, AudioSupport, StorageSupport, MediaSupport, PerformanceSupport } from '@/types/mobile'
 import { checkWebGLSupport } from '@/utils/browser-compatibility'
 
+interface WebGLSupport {
+  webgl: boolean;
+  webgl2: boolean;
+  extensions: string[];
+  maxTextureSize: number;
+}
+
 export class BrowserCompatibilityTester {
+  private originalRAF: ((callback: FrameRequestCallback) => number) | null = null;
+  private frameCount: number = 0;
+
+  constructor() {
+    this.setupPerformanceOptimizations();
+  }
+
   public async test(): Promise<CompatibilityReport> {
     const features = await this.detectFeatures()
     const issues = this.analyzeIssues(features)
@@ -114,7 +128,7 @@ export class BrowserCompatibilityTester {
       return {
         ...support,
         performance: performanceSupport,
-        fallback: this.getGraphicsFallbackOptions(support)
+        fallback: this.getGraphicsFallbackOptions()
       }
     } catch (error) {
       console.warn('Graphics support check failed:', error)
@@ -175,7 +189,7 @@ export class BrowserCompatibilityTester {
            'transformStyle' in el.style
   }
 
-  private getGraphicsFallbackOptions(support: WebGLSupport): {
+  private getGraphicsFallbackOptions(): {
     canvas2D: boolean;
     css3D: boolean;
   } {
@@ -371,5 +385,75 @@ export class BrowserCompatibilityTester {
     }
 
     return recommendations
+  }
+
+  private setupPerformanceOptimizations() {
+    // Set balanced latency hint for mobile
+    if ('scheduler' in window && 'postTask' in (window as any).scheduler) {
+      (window as any).scheduler.postTask(() => {}, {
+        priority: 'user-visible',
+        delay: 0
+      });
+    }
+
+    // Setup power save mode monitoring
+    if ('getBattery' in navigator) {
+      navigator.getBattery().then(battery => {
+        this.handleBatteryChange(battery);
+        battery.addEventListener('levelchange', () => this.handleBatteryChange(battery));
+        battery.addEventListener('chargingchange', () => this.handleBatteryChange(battery));
+      });
+    }
+  }
+
+  private handleBatteryChange(battery: any) {
+    const isPowerSaveMode = battery.level <= 0.2 && !battery.charging;
+    if (isPowerSaveMode) {
+      this.enablePowerSaveMode();
+    } else {
+      this.disablePowerSaveMode();
+    }
+  }
+
+  private enablePowerSaveMode() {
+    // Reduce frame rate
+    if ('requestAnimationFrame' in window) {
+      this.originalRAF = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+        if (!this.originalRAF) return 0;
+        return this.originalRAF((timestamp) => {
+          if (this.shouldSkipFrame()) {
+            return;
+          }
+          callback(timestamp);
+        });
+      };
+    }
+  }
+
+  private disablePowerSaveMode() {
+    // Restore original requestAnimationFrame
+    if (this.originalRAF) {
+      window.requestAnimationFrame = this.originalRAF;
+      this.originalRAF = null;
+    }
+  }
+
+  private shouldSkipFrame(): boolean {
+    this.frameCount = (this.frameCount || 0) + 1;
+    return this.frameCount % 2 !== 0; // Skip every other frame in power save mode
+  }
+
+  public dispose() {
+    // Clean up battery monitoring
+    if ('getBattery' in navigator) {
+      navigator.getBattery().then(battery => {
+        battery.removeEventListener('levelchange', () => this.handleBatteryChange(battery));
+        battery.removeEventListener('chargingchange', () => this.handleBatteryChange(battery));
+      });
+    }
+
+    // Restore original requestAnimationFrame if modified
+    this.disablePowerSaveMode();
   }
 }

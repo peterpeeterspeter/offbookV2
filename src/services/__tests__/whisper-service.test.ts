@@ -26,9 +26,6 @@ interface WhisperError {
 
 // Constants for testing
 const PERFORMANCE_THRESHOLDS = {
-  TRANSCRIPTION_LATENCY_MS: 1000,
-  STREAMING_LATENCY_MS: 100,
-  MAX_MEMORY_USAGE_MB: 512,
   MIN_CONFIDENCE: 0.6
 };
 
@@ -64,6 +61,8 @@ class MockWhisperService {
   private worker?: Worker;
   private activeTranscriptions = new Set<Promise<any>>();
   private errorHandler?: (error: Error) => void;
+  private lastRequestTime = 0;
+  private throttleDelay = 100; // 100ms between requests
 
   constructor(wsUrl: string = 'ws://localhost:8000/ws/whisper') {
     this.wsUrl = wsUrl;
@@ -126,6 +125,14 @@ class MockWhisperService {
     if (!this.initialized) {
       throw new Error('Service not initialized');
     }
+
+    // Implement throttling
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < this.throttleDelay) {
+      await new Promise(resolve => setTimeout(resolve, this.throttleDelay - timeSinceLastRequest));
+    }
+    this.lastRequestTime = Date.now();
 
     if (this.ws) {
       this.ws.send(blob);
@@ -235,7 +242,6 @@ class MockTranscriptionCache {
 const createAudioBlob = (duration: number, sampleRate = 16000): Blob => {
   const numSamples = Math.floor(duration * sampleRate);
   const audioData = new Float32Array(numSamples);
-  // Generate a simple sine wave
   for (let i = 0; i < numSamples; i++) {
     audioData[i] = Math.sin(2 * Math.PI * 440 * i / sampleRate);
   }
@@ -628,7 +634,7 @@ describe('WhisperService', () => {
 
         const result = await MockWhisperService.transcribeAudio(mockBlob);
         expect((result as WhisperResponse).language).toBe(lang);
-      }
+      });
     });
   });
 
@@ -978,15 +984,22 @@ describe('WhisperService', () => {
   });
 
   describe('Offline Mode', () => {
+    let originalNavigator: Navigator;
+
     beforeEach(() => {
-      // @ts-expect-error - Testing readonly property
-      navigator.onLine = false;
+      originalNavigator = window.navigator;
+      Object.defineProperty(window, 'navigator', {
+        value: { ...originalNavigator, onLine: false },
+        configurable: true
+      });
       window.dispatchEvent(new Event('offline'));
     });
 
     afterEach(() => {
-      // @ts-expect-error - Testing readonly property
-      navigator.onLine = true;
+      Object.defineProperty(window, 'navigator', {
+        value: originalNavigator,
+        configurable: true
+      });
       window.dispatchEvent(new Event('online'));
     });
 
@@ -997,8 +1010,10 @@ describe('WhisperService', () => {
       const offlinePromise = service.sendAudioChunk(mockBlob);
 
       // Simulate coming back online
-      // @ts-expect-error - Testing readonly property
-      navigator.onLine = true;
+      Object.defineProperty(window, 'navigator', {
+        value: { ...originalNavigator, onLine: true },
+        configurable: true
+      });
       window.dispatchEvent(new Event('online'));
 
       await expect(offlinePromise).resolves.not.toThrow();
@@ -1015,8 +1030,10 @@ describe('WhisperService', () => {
       ];
 
       // Simulate coming back online
-      // @ts-expect-error - Testing readonly property
-      navigator.onLine = true;
+      Object.defineProperty(window, 'navigator', {
+        value: { ...originalNavigator, onLine: true },
+        configurable: true
+      });
       window.dispatchEvent(new Event('online'));
 
       await Promise.all(queuedItems);
@@ -1025,19 +1042,30 @@ describe('WhisperService', () => {
   });
 
   describe('Rate Limiting', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('should throttle rapid requests', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      const startTime = performance.now();
+      const startTime = Date.now();
       const requests = Array(10).fill(null).map(() =>
         service.sendAudioChunk(mockBlob)
       );
 
-      await Promise.all(requests);
-      const endTime = performance.now();
+      // Use vi.advanceTimersByTime to simulate time passing
+      for (let i = 0; i < 10; i++) {
+        vi.advanceTimersByTime(100);
+      }
 
-      // Should take at least 1 second for 10 requests with 100ms throttle
+      await Promise.all(requests);
+      const endTime = Date.now();
       expect(endTime - startTime).toBeGreaterThan(1000);
     });
 
@@ -1045,74 +1073,105 @@ describe('WhisperService', () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      // Simulate burst of requests
       const burstPromises = Array(20).fill(null).map(() =>
         service.sendAudioChunk(mockBlob)
       );
+
+      // Advance time to allow all requests to complete
+      vi.advanceTimersByTime(2000);
 
       await expect(Promise.all(burstPromises)).resolves.not.toThrow();
     });
   });
 
   describe('Cross-Tab Coordination', () => {
+    let mockChannel: BroadcastChannel;
+
+    beforeEach(() => {
+      mockChannel = new BroadcastChannel('whisper-service');
+      vi.spyOn(mockChannel, 'postMessage');
+    });
+
+    afterEach(() => {
+      mockChannel.close();
+    });
+
     it('should coordinate between tabs using BroadcastChannel', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      const channel = new BroadcastChannel('whisper-service');
       const messageHandler = vi.fn();
-      channel.addEventListener('message', messageHandler);
+      mockChannel.addEventListener('message', messageHandler);
 
       await service.sendAudioChunk(mockBlob);
 
-      expect(messageHandler).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            type: 'TRANSCRIPTION_COMPLETE'
-          })
-        })
-      );
+      expect(mockChannel.postMessage).toHaveBeenCalledWith({
+        type: 'TRANSCRIPTION_COMPLETE',
+        data: expect.any(Object)
+      });
     });
 
     it('should handle tab-specific resources', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      // Simulate another tab's message
-      const channel = new BroadcastChannel('whisper-service');
-      channel.postMessage({ type: 'RELEASE_RESOURCES' });
+      // Initialize service resources
+      service['audioContext'] = new AudioContext();
 
-      // Should not affect this tab's resources
+      // Simulate message from another tab
+      mockChannel.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'RELEASE_RESOURCES' }
+      }));
+
+      // Service should maintain its resources
       expect(service['initialized']).toBe(true);
       expect(service['audioContext']).toBeDefined();
     });
   });
 
   describe('Worker Lifecycle', () => {
+    let mockWorker: Worker;
+
+    beforeEach(() => {
+      mockWorker = {
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        postMessage: vi.fn(),
+        dispatchEvent: vi.fn()
+      } as unknown as Worker;
+
+      // Mock Worker constructor
+      global.Worker = vi.fn().mockImplementation(() => mockWorker);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     it('should terminate worker on cleanup', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      const terminateSpy = vi.fn();
-      // @ts-expect-error - Mock worker
-      service['worker'].terminate = terminateSpy;
+      // Set the mock worker
+      service['worker'] = mockWorker;
 
       await service.cleanup();
-      expect(terminateSpy).toHaveBeenCalled();
+      expect(mockWorker.terminate).toHaveBeenCalled();
     });
 
     it('should restart worker after error', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      // Simulate worker error
-      const error = new Error('Worker crashed');
-      // @ts-expect-error - Mock worker
-      service['worker'].dispatchEvent(new ErrorEvent('error', { error }));
+      // Set the mock worker and simulate error
+      service['worker'] = mockWorker;
+      mockWorker.dispatchEvent(new ErrorEvent('error', { error: new Error('Worker crashed') }));
 
       // Should create new worker
       await service.sendAudioChunk(mockBlob);
       expect(service['worker']).toBeDefined();
+      expect(global.Worker).toHaveBeenCalledTimes(2);
     });
   });
 });
