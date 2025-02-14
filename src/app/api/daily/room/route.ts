@@ -1,16 +1,16 @@
-import type { ActionResponse } from '@/types/actions'
+import { NextResponse } from 'next/server'
 
-export async function createRoom(request: Request) {
+export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const apiKey = import.meta.env.VITE_DAILY_API_KEY
-    const domain = import.meta.env.VITE_DAILY_DOMAIN
+    const apiKey = process.env.DAILY_API_KEY
+    const domain = process.env.DAILY_DOMAIN
 
     if (!apiKey || !domain) {
-      return {
+      return NextResponse.json({
         success: false,
         error: 'Missing Daily.co configuration'
-      }
+      }, { status: 500 })
     }
 
     const response = await fetch(`https://api.daily.co/v1/rooms`, {
@@ -20,50 +20,46 @@ export async function createRoom(request: Request) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        name: body.name || `offbook-${Date.now()}`,
+        ...body,
         properties: {
-          max_participants: body.properties?.maxParticipants || 10,
-          enable_chat: body.properties?.enableChat ?? true,
-          start_audio_off: body.properties?.startAudioOff ?? false,
-          start_video_off: body.properties?.startVideoOff ?? false,
-          exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60 // 24 hour expiry
+          ...body.properties,
+          enable_chat: true,
+          enable_knocking: false,
+          enable_screenshare: true,
+          enable_recording: 'cloud'
         }
       })
     })
 
-    if (!response.ok) {
-      const error = await response.json()
-      return {
-        success: false,
-        error: `Failed to create Daily.co room: ${error.message || 'Unknown error'}`
-      }
-    }
-
-    const room = await response.json()
-    return {
-      success: true,
-      data: {
-        url: `https://${domain}/${room.name}`,
-        name: room.name
-      }
-    }
+    const data = await response.json()
+    return NextResponse.json(data)
   } catch (error) {
-    return {
+    console.error('Error creating Daily.co room:', error)
+    return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to create room'
-    }
+      error: 'Failed to create room'
+    }, { status: 500 })
   }
 }
 
-export async function deleteRoom(name: string) {
+export async function DELETE(request: Request) {
   try {
-    const apiKey = import.meta.env.VITE_DAILY_API_KEY
+    const { searchParams } = new URL(request.url)
+    const name = searchParams.get('name')
 
     if (!name) {
-      return {
+      return NextResponse.json({
         success: false,
         error: 'Room name is required'
-      }
+      }, { status: 400 })
+    }
+
+    const apiKey = process.env.DAILY_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({
+        success: false,
+        error: 'Missing Daily.co configuration'
+      }, { status: 500 })
     }
 
     const response = await fetch(`https://api.daily.co/v1/rooms/${name}`, {
@@ -74,18 +70,15 @@ export async function deleteRoom(name: string) {
     })
 
     if (!response.ok) {
-      const error = await response.json()
-      return {
-        success: false,
-        error: `Failed to delete room: ${error.message || 'Unknown error'}`
-      }
+      throw new Error(`Failed to delete room: ${response.statusText}`)
     }
 
-    return { success: true }
+    return NextResponse.json({ success: true })
   } catch (error) {
-    return {
+    console.error('Error deleting Daily.co room:', error)
+    return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to delete room'
-    }
+      error: 'Failed to delete room'
+    }, { status: 500 })
   }
 }

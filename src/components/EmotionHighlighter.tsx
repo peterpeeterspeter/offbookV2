@@ -6,7 +6,7 @@ import React, {
   type ReactNode,
 } from "react";
 import { detectEmotions } from "@/services/deepseek";
-import { DeepSeekResponse, EmotionSuggestion } from "../services/types";
+import { EmotionSuggestion } from "../services/types";
 import { DeepSeekError } from "../services/errors";
 
 interface EmotionHighlighterProps {
@@ -85,62 +85,59 @@ export function EmotionHighlighter({
   }, [content]);
 
   // Handle text selection and emotion detection
-  const handleMouseUp = useCallback(
-    async (e: MouseEvent): Promise<void> => {
-      if (readOnly) return;
+  const handleMouseUp = useCallback(async (): Promise<void> => {
+    if (readOnly) return;
 
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) {
-        setShowEmotionPicker(false);
-        return;
-      }
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      setShowEmotionPicker(false);
+      return;
+    }
 
-      const range = selection.getRangeAt(0);
-      const text = range.toString().trim();
-      if (!text) return;
+    const range = selection.getRangeAt(0);
+    const text = range.toString().trim();
+    if (!text) return;
 
-      // Show emotion picker near the selection
-      const rect = range.getBoundingClientRect();
-      setPickerPosition({
-        x: rect.left + window.scrollX,
-        y: rect.bottom + window.scrollY,
-      });
+    // Show emotion picker near the selection
+    const rect = range.getBoundingClientRect();
+    setPickerPosition({
+      x: rect.left + window.scrollX,
+      y: rect.bottom + window.scrollY,
+    });
 
-      // Analyze emotions in selected text
-      setIsAnalyzing(true);
-      setError(null);
-      setDetectedEmotions([]);
-      try {
-        const result = await detectEmotions(text);
-        if (result && result.suggestions) {
-          setDetectedEmotions(result.suggestions);
-        } else {
-          setError("No emotions detected");
-          setDetectedEmotions([]);
-        }
-      } catch (e) {
-        console.error("Error detecting emotions:", e);
-        if (e instanceof DeepSeekError) {
-          setError(`DeepSeek API Error: ${e.message}`);
-        } else if (e instanceof Error) {
-          setError(`API Error: ${e.message}`);
-        } else {
-          setError("An unexpected error occurred while detecting emotions");
-        }
+    // Analyze emotions in selected text
+    setIsAnalyzing(true);
+    setError(null);
+    setDetectedEmotions([]);
+    try {
+      const result = await detectEmotions(text);
+      if (result && result.suggestions) {
+        setDetectedEmotions(result.suggestions);
+      } else {
+        setError("No emotions detected");
         setDetectedEmotions([]);
-      } finally {
-        setIsAnalyzing(false);
-        setShowEmotionPicker(true);
       }
+    } catch (e) {
+      console.error("Error detecting emotions:", e);
+      if (e instanceof DeepSeekError) {
+        setError(`DeepSeek API Error: ${e.message}`);
+      } else if (e instanceof Error) {
+        setError(`API Error: ${e.message}`);
+      } else {
+        setError("An unexpected error occurred while detecting emotions");
+      }
+      setDetectedEmotions([]);
+    } finally {
+      setIsAnalyzing(false);
+      setShowEmotionPicker(true);
+    }
 
-      setSelection({
-        text,
-        start: range.startOffset,
-        end: range.endOffset,
-      });
-    },
-    [readOnly]
-  );
+    setSelection({
+      text,
+      start: range.startOffset,
+      end: range.endOffset,
+    });
+  }, [readOnly]);
 
   // Add event listeners
   useEffect(() => {

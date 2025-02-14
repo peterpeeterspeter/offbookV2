@@ -5,8 +5,6 @@ import { useDailyCall } from "@/hooks/use-daily-call";
 import { useConfig } from "@/hooks/use-config";
 import { AudioLevelIndicator } from "@/components/audio-level-indicator";
 import { NetworkQualityIndicator } from "@/components/network-quality-indicator";
-import { createRoom, deleteRoom } from "@/api/daily";
-import type { ActionResponse } from "@/types/actions";
 
 interface PracticeRoomProps {
   userName: string;
@@ -184,8 +182,8 @@ export function PracticeRoom({ userName, onError }: PracticeRoomProps) {
             {isConnecting
               ? "Connecting..."
               : isConnected
-              ? "Connected"
-              : "Disconnected"}
+                ? "Connected"
+                : "Disconnected"}
           </span>
           {config.webrtc.enableMetrics && (
             <span className="text-sm text-gray-500">

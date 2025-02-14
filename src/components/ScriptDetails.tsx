@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Script } from "@/types/script";
 import { ScriptAnalysisService } from "@/services/script-analysis";
+import { AudioServiceType } from "@/components/SceneFlow";
+
+interface ExtendedScript extends Script {
+  analysisStatus: "pending" | "processing" | "completed" | "failed";
+  analysisProgress: number;
+}
 
 interface Props {
   scriptId: string;
@@ -15,15 +21,27 @@ interface Props {
 
 export default function ScriptDetails({ scriptId }: Props) {
   const { toast } = useToast();
-  const [script, setScript] = useState<Script | null>(null);
-  const [loading, setLoading] = useState(true);
-  const scriptService = new ScriptAnalysisService();
+  const [script, setScript] = useState<ExtendedScript | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [scriptService] = useState(() => {
+    const audioService: AudioServiceType = {
+      setup: async () => {},
+      startRecording: async () => {},
+      stopRecording: async () => ({ duration: 0, accuracy: 0 }),
+    };
+    return new ScriptAnalysisService(audioService);
+  });
 
   useEffect(() => {
     const fetchScriptDetails = async () => {
       try {
         const data = await scriptService.getScriptDetails(scriptId);
-        setScript(data);
+        const status = await scriptService.getAnalysisStatus(scriptId);
+        setScript({
+          ...data,
+          analysisStatus: status.status,
+          analysisProgress: status.progress,
+        });
       } catch (error) {
         toast({
           title: "Error",
@@ -48,7 +66,7 @@ export default function ScriptDetails({ scriptId }: Props) {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [scriptId, script?.analysisStatus, toast]);
+  }, [scriptId, script?.analysisStatus, toast, scriptService]);
 
   if (loading) {
     return <div>Loading...</div>;
@@ -107,7 +125,8 @@ export default function ScriptDetails({ scriptId }: Props) {
               <Card key={role.id} className="p-4">
                 <h3 className="text-lg font-semibold mb-2">{role.name}</h3>
                 <p className="text-gray-600 mb-2">
-                  {role.characterDescription}
+                  {role.metadata?.personality?.join(", ") ||
+                    "No character description available"}
                 </p>
                 <div className="flex space-x-2">
                   <Button
@@ -126,11 +145,11 @@ export default function ScriptDetails({ scriptId }: Props) {
             {script.scenes.map((scene) => (
               <Card key={scene.id} className="p-4">
                 <h3 className="text-lg font-semibold mb-2">
-                  Scene {scene.number}: {scene.title}
+                  Scene {scene.startLine}: {scene.title}
                 </h3>
                 <p className="text-gray-600 mb-2">{scene.description}</p>
                 <p className="text-sm text-gray-500">
-                  Location: {scene.location}
+                  Location: {scene.metadata?.location || "Unknown"}
                 </p>
                 <p className="text-sm text-gray-500">
                   Characters: {scene.characters.join(", ")}
