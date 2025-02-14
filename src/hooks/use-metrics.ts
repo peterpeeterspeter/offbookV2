@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect } from 'react'
 import type { UsageMetrics } from '@/services/monitoring/analytics-service'
 
