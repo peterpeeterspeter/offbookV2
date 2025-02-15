@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
-import React from 'react';
-import { PracticeRoom } from '@/components/practice-room';
+import React from "react";
+import { PracticeRoom } from "@/components/practice-room";
 
 export default function PracticePage() {
   const handleError = (error: Error) => {
-    console.error('Practice room error:', error);
+    console.error("Practice room error:", error);
   };
 
   return (
@@ -19,4 +19,4 @@ export default function PracticePage() {
       </div>
     </main>
   );
-} 
+}

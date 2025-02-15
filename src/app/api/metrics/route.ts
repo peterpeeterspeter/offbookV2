@@ -1,45 +1,50 @@
 import { NextResponse } from 'next/server'
 import { monitoringService } from '@/services/monitoring/monitoring-service'
 import { PerformanceAnalyzer } from '@/services/performance-analyzer'
+import { logger } from '@/lib/logger'
 
 const analyzer = new PerformanceAnalyzer()
 
 export async function GET() {
   try {
-    const [performanceMetrics, monitoringReport] = await Promise.all([
-      analyzer.getPerformanceMetrics(),
-      monitoringService.generateReport()
-    ])
-
+    // Server-side metrics collection
     const metrics = {
-      timestamp: Date.now(),
-      performance: {
-        memory: performanceMetrics.pipeline,
-        cache: performanceMetrics.cache,
-        streaming: performanceMetrics.streaming
-      },
-      errors: {
-        total: monitoringReport.errors.length,
-        byType: monitoringReport.errors.reduce((acc, error) => {
-          acc[error.type] = (acc[error.type] || 0) + 1
-          return acc
-        }, {} as Record<string, number>)
-      },
-      health: monitoringReport.health,
-      usage: {
-        activeUsers: performanceMetrics.streaming?.activeStreams || 0,
-        totalRequests: performanceMetrics.pipeline.totalRequests,
-        errorRate: performanceMetrics.pipeline.errorRate,
-        cacheHitRate: performanceMetrics.cache.ratio
-      }
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      version: process.env.NEXT_PUBLIC_APP_VERSION,
     }
 
     return NextResponse.json(metrics)
   } catch (error) {
-    return NextResponse.json({
-      status: 'error',
-      timestamp: Date.now(),
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 })
+    logger.error({
+      message: 'Failed to collect metrics',
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return NextResponse.json(
+      { error: 'Failed to collect metrics' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const data = await request.json()
+
+    logger.info({
+      message: 'Received metrics data',
+      data,
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    logger.error({
+      message: 'Failed to process metrics data',
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return NextResponse.json(
+      { error: 'Failed to process metrics data' },
+      { status: 500 }
+    )
   }
 }

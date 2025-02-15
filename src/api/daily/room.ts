@@ -42,7 +42,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const apiKey = import.meta.env.VITE_DAILY_API_KEY
+    const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY
     const response = await fetch(`https://api.daily.co/v1/rooms/${name}`, {
       method: 'DELETE',
       headers: {

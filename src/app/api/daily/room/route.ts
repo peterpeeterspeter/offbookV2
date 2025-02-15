@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server'
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const apiKey = process.env.DAILY_API_KEY
-    const domain = process.env.DAILY_DOMAIN
+    const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY
+    const domain = process.env.NEXT_PUBLIC_DAILY_DOMAIN
 
     if (!apiKey || !domain) {
       return NextResponse.json({
@@ -54,7 +54,7 @@ export async function DELETE(request: Request) {
       }, { status: 400 })
     }
 
-    const apiKey = process.env.DAILY_API_KEY
+    const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY
     if (!apiKey) {
       return NextResponse.json({
         success: false,

@@ -33,10 +33,18 @@ export class MockMediaStreamTrack implements MediaStreamTrack {
   }
 
   getSettings(): MediaTrackSettings {
-    return {};
+    return {
+      deviceId: 'mock-device',
+      groupId: 'mock-group',
+      sampleRate: 48000,
+      sampleSize: 16,
+      channelCount: 2
+    };
   }
 
-  stop(): void {}
+  stop(): void {
+    vi.fn();
+  }
 
   addEventListener(): void {}
   removeEventListener(): void {}
@@ -90,13 +98,10 @@ export class MockMediaStream implements MediaStream {
   }
 
   removeTrack(track: MediaStreamTrack): void {
-    const index = this.tracks.indexOf(track);
-    if (index !== -1) {
-      this.tracks.splice(index, 1);
-      if (this.onremovetrack) {
-        const event = new Event('removetrack') as MediaStreamTrackEvent;
-        this.onremovetrack.call(this, event);
-      }
+    this.tracks = this.tracks.filter(t => t !== track);
+    if (this.onremovetrack) {
+      const event = new Event('removetrack') as MediaStreamTrackEvent;
+      this.onremovetrack.call(this, event);
     }
   }
 
@@ -325,19 +330,41 @@ class MockAudioDestinationNode implements AudioDestinationNode {
 
 // Mock AudioContext
 export class MockAudioContext implements AudioContext {
-  baseLatency: number = 0.005;
-  outputLatency: number = 0.005;
-  audioWorklet: AudioWorklet = {} as AudioWorklet;
-  currentTime: number = 0;
-  destination: AudioDestinationNode;
-  listener: AudioListener = {} as AudioListener;
-  sampleRate: number = 44100;
-  state: AudioContextState = 'running';
-  onstatechange: ((this: BaseAudioContext, ev: Event) => any) | null = null;
-
-  constructor() {
-    this.destination = new MockAudioDestinationNode(this as unknown as BaseAudioContext);
+  state: AudioContextState = 'running'
+  sampleRate = 48000
+  baseLatency = 0
+  destination = {
+    channelCount: 2,
+    channelCountMode: 'explicit',
+    channelInterpretation: 'speakers',
+    maxChannelCount: 2,
+    numberOfInputs: 1,
+    numberOfOutputs: 0,
+    connect: vi.fn(),
+    disconnect: vi.fn()
   }
+
+  createAnalyser = vi.fn(() => ({
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    fftSize: 2048,
+    frequencyBinCount: 1024,
+    getByteFrequencyData: vi.fn(),
+    getByteTimeDomainData: vi.fn()
+  }))
+
+  createGain = vi.fn(() => ({
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    gain: { value: 1 }
+  }))
+
+  suspend = vi.fn().mockResolvedValue(undefined)
+  resume = vi.fn().mockResolvedValue(undefined)
+  close = vi.fn().mockResolvedValue(undefined)
+  addEventListener = vi.fn()
+  removeEventListener = vi.fn()
+  dispatchEvent = vi.fn(() => true)
 
   createAnalyser(): AnalyserNode {
     const analyser = {
@@ -443,30 +470,9 @@ export class MockAudioContext implements AudioContext {
 
   getOutputTimestamp(): AudioTimestamp {
     return {
-      contextTime: this.currentTime,
+      contextTime: 0,
       performanceTime: performance.now()
     };
-  }
-
-  close(): Promise<void> {
-    this.state = 'closed';
-    return Promise.resolve();
-  }
-
-  resume(): Promise<void> {
-    this.state = 'running';
-    return Promise.resolve();
-  }
-
-  suspend(): Promise<void> {
-    this.state = 'suspended';
-    return Promise.resolve();
-  }
-
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  dispatchEvent(): boolean {
-    return true;
   }
 
   createBuffer(): AudioBuffer { return {} as AudioBuffer; }
@@ -491,3 +497,44 @@ export class MockAudioContext implements AudioContext {
 // Patch global AudioContext
 (globalThis as any).AudioContext = MockAudioContext;
 (globalThis as any).webkitAudioContext = MockAudioContext;
+
+export const mockIndexedDB = {
+  open: vi.fn(),
+  deleteDatabase: vi.fn(),
+  databases: vi.fn(),
+  cmp: vi.fn()
+}
+
+export const mockLocalStorage = {
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
+  key: vi.fn(),
+  length: 0
+}
+
+export class MockWorker {
+  onmessage: ((e: MessageEvent) => void) | null = null
+  onerror: ((e: ErrorEvent) => void) | null = null
+
+  postMessage = vi.fn()
+  terminate = vi.fn()
+  addEventListener = vi.fn()
+  removeEventListener = vi.fn()
+}
+
+export class MockBroadcastChannel {
+  readonly name: string
+  onmessage: ((e: MessageEvent) => void) | null = null
+  onmessageerror: ((e: MessageEvent) => void) | null = null
+
+  constructor(name: string) {
+    this.name = name
+  }
+
+  postMessage = vi.fn()
+  close = vi.fn()
+  addEventListener = vi.fn()
+  removeEventListener = vi.fn()
+}

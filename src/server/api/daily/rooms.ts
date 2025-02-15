@@ -1,7 +1,7 @@
 import { Request, Response } from 'express'
 
-const DAILY_API_KEY = process.env.VITE_DAILY_API_KEY || ''
-const DAILY_DOMAIN = process.env.VITE_DAILY_DOMAIN || ''
+const DAILY_API_KEY = process.env.NEXT_PUBLIC_DAILY_API_KEY || ''
+const DAILY_DOMAIN = process.env.NEXT_PUBLIC_DAILY_DOMAIN || ''
 
 export async function createRoom(req: Request, res: Response) {
   try {

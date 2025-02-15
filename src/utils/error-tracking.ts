@@ -1,5 +1,6 @@
 import { ErrorReport, ErrorType, ErrorSeverity } from '@/types/monitoring';
 import { MONITORING_ENDPOINTS } from '@/config/monitoring';
+import { logger } from '@/lib/logger';
 
 export async function reportError(
   error: Error,
@@ -55,28 +56,60 @@ export function wrapWithErrorTracking<T extends (...args: any[]) => any>(
 }
 
 export function setupGlobalErrorTracking(): void {
-  // Handle unhandled promise rejections
-  window.addEventListener('unhandledrejection', (event) => {
-    reportError(
-      event.reason instanceof Error ? event.reason : new Error(String(event.reason)),
-      'promise',
-      'high',
-      { type: 'unhandledrejection' }
-    );
-  });
+  if (typeof window === 'undefined') {
+    return; // Skip setup on server-side
+  }
 
-  // Handle uncaught errors
-  window.addEventListener('error', (event) => {
-    reportError(
-      event.error || new Error(event.message),
-      'runtime',
-      'high',
-      {
-        type: 'uncaught',
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno
-      }
-    );
+  window.onerror = (message, source, lineno, colno, error) => {
+    logger.error({
+      message: 'Global error caught',
+      error: error instanceof Error ? error.message : String(error),
+      source,
+      lineno,
+      colno,
+    });
+  };
+
+  window.onunhandledrejection = (event) => {
+    logger.error({
+      message: 'Unhandled promise rejection',
+      error: event.reason instanceof Error ? event.reason.message : String(event.reason),
+    });
+  };
+}
+
+export function trackError(error: unknown, context?: Record<string, unknown>): void {
+  logger.error({
+    message: 'Error tracked',
+    error: error instanceof Error ? error.message : String(error),
+    context,
+  });
+}
+
+export function trackMetric(name: string, value: number, tags?: Record<string, string>): void {
+  if (typeof window === 'undefined') {
+    return; // Skip metrics on server-side
+  }
+
+  const metric = {
+    name,
+    value,
+    tags,
+    timestamp: Date.now(),
+  };
+
+  // Send metric to backend
+  fetch('/api/metrics', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(metric),
+  }).catch((error) => {
+    logger.error({
+      message: 'Failed to send metric',
+      error: error instanceof Error ? error.message : String(error),
+      metric,
+    });
   });
 }

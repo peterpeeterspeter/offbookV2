@@ -1,11 +1,16 @@
 import { DailyProvider } from '@daily-co/daily-react'
 import Daily, { DailyCall, DailyEvent, DailyInputSettings } from '@daily-co/daily-js'
+import { env } from '@/config/env'
 
 interface DailyServiceConfig {
   url: string
   token?: string
   userName: string
   audioConfig?: MediaTrackConstraints
+  daily: {
+    apiKey: string
+    domain: string
+  }
 }
 
 interface DailyServiceError extends Error {
@@ -27,6 +32,8 @@ export class DailyService {
       // Validate configuration
       if (!config.url) throw this.createError('INVALID_CONFIG', 'URL is required')
       if (!config.userName) throw this.createError('INVALID_CONFIG', 'Username is required')
+      if (!config.daily.apiKey) throw this.createError('INVALID_CONFIG', 'Daily API key is required')
+      if (!config.daily.domain) throw this.createError('INVALID_CONFIG', 'Daily domain is required')
 
       // Create call object with audio only
       this.daily = Daily.createCallObject({
@@ -88,14 +95,8 @@ export class DailyService {
 
       if (!this.daily) throw this.createError('NOT_INITIALIZED', 'Daily service not initialized')
 
-      const deviceId = audioTrack.getAudioTracks()[0]?.getSettings()?.deviceId
-      if (!deviceId) throw this.createError('AUDIO_CONFIG_FAILED', 'Failed to get audio device ID')
-
-      // Set input devices using the correct Daily.co API method
-      await this.daily.setInputDevicesAsync({
-        audioDeviceId: deviceId,
-        videoDeviceId: null
-      })
+      // Just enable audio with the current device
+      await this.daily.setLocalAudio(true)
     } catch (error) {
       throw this.handleError(error)
     }
@@ -117,7 +118,7 @@ export class DailyService {
   destroy(): void {
     if (this.daily) {
       try {
-        this.daily.destroy()
+        this.daily.leave()
       } catch (error) {
         console.error('Error destroying Daily.co instance:', this.handleError(error))
       }

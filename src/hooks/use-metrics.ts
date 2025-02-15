@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
+import { useMetricsContext } from '@/app/analytics/context/metrics-context'
 import type { UsageMetrics } from '@/services/monitoring/analytics-service'
 
 interface UseMetricsOptions {
@@ -19,18 +20,23 @@ interface UseMetricsResult {
 }
 
 export function useMetrics(options: UseMetricsOptions = {}): UseMetricsResult {
-  const { refreshInterval = 60000, timeRange } = options
-  const [data, setData] = useState<UsageMetrics | null>(null)
-  const [error, setError] = useState<Error | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const { refreshInterval = 60000 } = options
+  const {
+    timeRange,
+    setTimeRange,
+    metrics: data,
+    setMetrics: setData,
+    error,
+    setError,
+    isLoading,
+    setIsLoading,
+  } = useMetricsContext()
 
   async function fetchMetrics() {
     try {
       const params = new URLSearchParams()
-      if (timeRange) {
-        params.set('start', timeRange.start.toString())
-        params.set('end', timeRange.end.toString())
-      }
+      params.set('start', timeRange.start.toString())
+      params.set('end', timeRange.end.toString())
 
       const response = await fetch(`/api/monitoring/analytics?${params}`)
       if (!response.ok) {
@@ -48,18 +54,21 @@ export function useMetrics(options: UseMetricsOptions = {}): UseMetricsResult {
   }
 
   useEffect(() => {
-    fetchMetrics()
-
-    if (refreshInterval > 0) {
-      const interval = setInterval(fetchMetrics, refreshInterval)
-      return () => clearInterval(interval)
+    if (options.timeRange) {
+      setTimeRange(options.timeRange)
     }
-  }, [refreshInterval, timeRange?.start, timeRange?.end])
+  }, [options.timeRange, setTimeRange])
+
+  useEffect(() => {
+    fetchMetrics()
+    const interval = setInterval(fetchMetrics, refreshInterval)
+    return () => clearInterval(interval)
+  }, [timeRange, refreshInterval])
 
   return {
     data,
     error,
     isLoading,
-    mutate: fetchMetrics
+    mutate: fetchMetrics,
   }
 }

@@ -8,7 +8,12 @@ import {
   MockMediaRecorder as MediaRecorderImpl,
   MockMediaStream as MediaStreamImpl,
   MockMediaStreamTrack as MediaStreamTrackImpl,
-  MockBlobEvent as BlobEventImpl
+  MockBlobEvent as BlobEventImpl,
+  MockAudioContext,
+  mockIndexedDB,
+  mockLocalStorage,
+  MockWorker,
+  MockBroadcastChannel
 } from './mocks/browser-apis'
 
 // Extend ProcessEnv interface
@@ -17,7 +22,8 @@ declare global {
     interface ProcessEnv {
       REACT_APP_DEEPSEEK_API_KEY: string;
       REACT_APP_ELEVENLABS_API_KEY: string;
-      VITE_DAILY_API_KEY: string;
+      NEXT_PUBLIC_DAILY_API_KEY: string;
+      NEXT_PUBLIC_DAILY_DOMAIN: string;
     }
   }
 
@@ -26,18 +32,18 @@ declare global {
     AudioContext: typeof MockAudioContext;
     webkitAudioContext: typeof MockAudioContext;
     indexedDB: typeof mockIndexedDB;
-    localStorage: typeof localStorageMock;
+    localStorage: typeof mockLocalStorage;
     MediaRecorder: typeof MediaRecorderImpl;
-    Worker: typeof WorkerMock;
-    BroadcastChannel: typeof BroadcastChannelMock;
+    Worker: typeof MockWorker;
+    BroadcastChannel: typeof MockBroadcastChannel;
   }
 
   // Global variable declarations
   var MediaRecorder: typeof MediaRecorderImpl;
   var AudioContext: typeof MockAudioContext;
   var webkitAudioContext: typeof MockAudioContext;
-  var Worker: typeof WorkerMock;
-  var BroadcastChannel: typeof BroadcastChannelMock;
+  var Worker: typeof MockWorker;
+  var BroadcastChannel: typeof MockBroadcastChannel;
 
   // Add proper interfaces for mock implementations
   interface MockAudioContextOptions {
@@ -71,9 +77,10 @@ vi.setConfig({
 })
 
 // Mock environment variables
-process.env.REACT_APP_ELEVENLABS_API_KEY = 'test-key'
-process.env.REACT_APP_DEEPSEEK_API_KEY = 'test-key'
-process.env.VITE_DAILY_API_KEY = 'test-key'
+process.env.REACT_APP_ELEVENLABS_API_KEY = 'test-elevenlabs-api-key'
+process.env.REACT_APP_DEEPSEEK_API_KEY = 'test-deepseek-api-key'
+process.env.NEXT_PUBLIC_DAILY_API_KEY = 'test-daily-api-key'
+process.env.NEXT_PUBLIC_DAILY_DOMAIN = 'test-daily-domain'
 
 // Mock TextEncoder/TextDecoder
 global.TextEncoder = TextEncoder
@@ -174,7 +181,7 @@ const mockIndexedDB = {
 // Mock localStorage
 const mockStorage = new Map<string, string>();
 
-const localStorageMock = {
+const mockLocalStorage = {
   getItem: vi.fn((key: string): string | null => mockStorage.get(key) ?? null),
   setItem: vi.fn((key: string, value: string): void => mockStorage.set(key, value)),
   removeItem: vi.fn((key: string) => mockStorage.delete(key)),
@@ -186,13 +193,13 @@ const localStorageMock = {
 } as Storage;
 
 Object.defineProperty(global, 'localStorage', {
-  value: localStorageMock,
+  value: mockLocalStorage,
   writable: true,
   configurable: true
 });
 
 Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+  value: mockLocalStorage,
   writable: true,
   configurable: true
 });
@@ -296,7 +303,7 @@ global.IntersectionObserver = vi.fn().mockImplementation(() => ({
 }))
 
 // Mock Web Worker
-class WorkerMock implements Partial<Worker> {
+class MockWorker implements Partial<Worker> {
   onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
   onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
   onerror: ((this: Worker, ev: ErrorEvent) => any) | null = null;
@@ -327,7 +334,7 @@ class WorkerMock implements Partial<Worker> {
     // Implementation
   }
 }
-global.Worker = WorkerMock as any
+global.Worker = MockWorker as any
 
 // Reset all mocks before each test
 beforeEach(() => {
@@ -687,7 +694,7 @@ HTMLCanvasElement.prototype.getContext = vi.fn().mockImplementation((contextType
 });
 
 // Mock implementations with proper interfaces
-class BroadcastChannelMock implements Partial<BroadcastChannel> {
+class MockBroadcastChannel implements Partial<BroadcastChannel> {
   readonly name: string;
   onmessage: ((this: BroadcastChannel, ev: MessageEvent) => any) | null = null;
   onmessageerror: ((this: BroadcastChannel, ev: MessageEvent) => any) | null = null;
@@ -720,4 +727,8 @@ class BroadcastChannelMock implements Partial<BroadcastChannel> {
     // Implementation
   }
 }
+
+// Mock requestAnimationFrame
+global.requestAnimationFrame = vi.fn(callback => setTimeout(callback, 0))
+global.cancelAnimationFrame = vi.fn(id => clearTimeout(id))
 

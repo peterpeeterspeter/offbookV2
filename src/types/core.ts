@@ -13,9 +13,10 @@ export interface ServiceError {
 
 // State management
 export interface ServiceState<T> {
-  state: string;
-  error?: ServiceError;
-  context: T;
+  isInitialized: boolean;
+  isLoading: boolean;
+  error?: Error;
+  data?: T;
 }
 
 // Configuration
@@ -118,4 +119,17 @@ export interface ServiceContext {
   id: string;
   type: string;
   config?: Record<string, unknown>;
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface ErrorDetails {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors?: ErrorDetails[];
 }

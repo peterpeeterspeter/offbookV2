@@ -2,10 +2,10 @@ import type { MonitoringConfig } from '@/types/monitoring'
 
 export const monitoringConfig: MonitoringConfig = {
   errorTracking: {
-    enabled: true,
+    enabled: process.env.NODE_ENV === 'production',
     maxErrors: 1000,
-    ...(process.env.VITE_ERROR_REPORTING_URL && {
-      reportingEndpoint: process.env.VITE_ERROR_REPORTING_URL
+    ...(process.env.NEXT_PUBLIC_ERROR_REPORTING_URL && {
+      reportingEndpoint: process.env.NEXT_PUBLIC_ERROR_REPORTING_URL
     }),
     ignoredErrors: [
       'ResizeObserver loop limit exceeded',
@@ -19,7 +19,7 @@ export const monitoringConfig: MonitoringConfig = {
     }
   },
   performance: {
-    enabled: true,
+    enabled: process.env.NODE_ENV === 'production',
     sampleRate: 0.1, // 10% of sessions
     metrics: [
       'FCP',
@@ -42,11 +42,12 @@ export const monitoringConfig: MonitoringConfig = {
       fid: 100, // First Input Delay
       ttfb: 200, // Time to First Byte
       audioLatency: 100, // Audio processing latency
-      batteryDrain: 8 // 8% per hour as per checklist
+      batteryDrain: 8, // 8% per hour as per checklist
+      successRate: 0.99 // 99% success rate target
     }
   },
   health: {
-    enabled: true,
+    enabled: process.env.NODE_ENV === 'production',
     checkInterval: 60000, // 1 minute
     endpoints: [
       '/health',
@@ -56,11 +57,11 @@ export const monitoringConfig: MonitoringConfig = {
     ]
   },
   logging: {
-    enabled: true,
+    enabled: process.env.NODE_ENV === 'production',
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
     format: 'json',
     retention: 90, // 90 days
-    remoteEndpoint: process.env.LOG_REMOTE_ENDPOINT,
+    remoteEndpoint: process.env.NODE_ENV === 'production' ? process.env.LOG_REMOTE_ENDPOINT : undefined,
     batchSize: 100,
     batchInterval: 5000 // 5 seconds
   }
@@ -96,6 +97,12 @@ export const ERROR_SEVERITY_THRESHOLDS = {
     high: 12, // 12% per hour
     medium: 10, // 10% per hour
     low: 8 // 8% per hour (target)
+  },
+  successRate: {
+    critical: 0.95, // 95% success rate
+    high: 0.97, // 97% success rate
+    medium: 0.98, // 98% success rate
+    low: 0.99 // 99% success rate (target)
   }
 }
 

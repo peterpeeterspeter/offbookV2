@@ -1,8 +1,13 @@
 "use client";
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
 
 interface Config {
+  daily: {
+    apiKey: string;
+    domain: string;
+    roomUrl?: string;
+  };
   audio: {
     sampleRate: number;
     enableEchoCancellation: boolean;
@@ -22,6 +27,11 @@ interface ConfigContextType {
 }
 
 const defaultConfig: Config = {
+  daily: {
+    apiKey: process.env.NEXT_PUBLIC_DAILY_API_KEY || "",
+    domain: process.env.NEXT_PUBLIC_DAILY_DOMAIN || "",
+    roomUrl: process.env.NEXT_PUBLIC_DAILY_ROOM_URL,
+  },
   audio: {
     sampleRate: 48000,
     enableEchoCancellation: true,
@@ -33,7 +43,12 @@ const defaultConfig: Config = {
   },
 };
 
-const ConfigContext = createContext<ConfigContextType | null>(null);
+const ConfigContext = createContext<ConfigContextType>({
+  config: defaultConfig,
+  isValid: true,
+  errors: [],
+  updateConfig: () => {},
+});
 
 export function useConfig() {
   const context = useContext(ConfigContext);
@@ -48,10 +63,16 @@ interface ConfigProviderProps {
 }
 
 export function ConfigProvider({ children }: ConfigProviderProps) {
+  const [mounted, setMounted] = useState(false);
   const [config, setConfig] = useState<Config>(defaultConfig);
   const [errors, setErrors] = useState<
     Array<{ path: string; message: string }>
   >([]);
+
+  useEffect(() => {
+    setMounted(true);
+    validateConfig(config);
+  }, []);
 
   const updateConfig = (newConfig: Partial<Config>) => {
     setConfig((prev) => ({ ...prev, ...newConfig }));
@@ -60,6 +81,20 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
 
   const validateConfig = (configToValidate: Config) => {
     const newErrors: Array<{ path: string; message: string }> = [];
+
+    // Validate Daily config
+    if (!configToValidate.daily.apiKey) {
+      newErrors.push({
+        path: "daily.apiKey",
+        message: "NEXT_PUBLIC_DAILY_API_KEY is required",
+      });
+    }
+    if (!configToValidate.daily.domain) {
+      newErrors.push({
+        path: "daily.domain",
+        message: "NEXT_PUBLIC_DAILY_DOMAIN is required",
+      });
+    }
 
     // Validate audio config
     if (
@@ -81,6 +116,10 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
     errors,
     updateConfig,
   };
+
+  if (!mounted) {
+    return <>{children}</>;
+  }
 
   return (
     <ConfigContext.Provider value={value}>{children}</ConfigContext.Provider>

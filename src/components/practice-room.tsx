@@ -1,8 +1,10 @@
+"use client";
+
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useDailyCall } from "@/hooks/use-daily-call";
-import { useConfig } from "@/hooks/use-config";
+import { useConfig } from "@/providers/config-provider";
 import { AudioLevelIndicator } from "@/components/audio-level-indicator";
 import { NetworkQualityIndicator } from "@/components/network-quality-indicator";
 

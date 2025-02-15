@@ -6,6 +6,10 @@ interface UseDailyCallProps {
   token?: string;
   userName: string;
   onError?: (error: Error) => void;
+  daily: {
+    apiKey: string;
+    domain: string;
+  };
   audioConfig?: {
     sampleRate: number;
     echoCancellation: boolean;
@@ -40,6 +44,7 @@ export function useDailyCall({
   token,
   userName,
   onError,
+  daily,
   audioConfig
 }: UseDailyCallProps) {
   const [isConnected, setIsConnected] = useState(false);
@@ -66,6 +71,7 @@ export function useDailyCall({
       const config = {
         url: roomUrl,
         userName,
+        daily,
         ...(token && { token }),
         ...(audioConfig && { audioConfig })
       };
@@ -74,7 +80,7 @@ export function useDailyCall({
     } catch (err) {
       handleError(err instanceof Error ? err : new Error('Failed to initialize Daily.co service'));
     }
-  }, [roomUrl, token, userName, audioConfig, handleError]);
+  }, [roomUrl, token, userName, daily, audioConfig, handleError]);
 
   const joinRoom = useCallback(async () => {
     try {

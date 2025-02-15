@@ -1,8 +1,8 @@
 /// <reference types="vitest" />
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tsconfigPaths from 'vite-tsconfig-paths';
-import { resolve } from 'path';
+import path from 'path';
+import { loadEnv } from 'vite';
 
 // Document configuration decisions
 /**
@@ -12,41 +12,37 @@ import { resolve } from 'path';
  * 3. Build: Optimized chunks for better caching
  * 4. Types: Path aliases for cleaner imports
  */
-export default defineConfig(({ command, mode }) => {
-  // Load env file based on `mode` in the current working directory.
+export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
   // Validate required environment variables
-  const requiredEnvVars = ['VITE_DAILY_API_KEY', 'VITE_DAILY_DOMAIN'];
+  const requiredEnvVars = [
+    'NEXT_PUBLIC_DAILY_API_KEY',
+    'NEXT_PUBLIC_DAILY_DOMAIN',
+    'NEXT_PUBLIC_DAILY_ROOM_URL',
+    'NEXT_PUBLIC_DEEPSEEK_API_KEY',
+    'NEXT_PUBLIC_ELEVENLABS_API_KEY'
+  ];
   const missingEnvVars = requiredEnvVars.filter(key => !env[key]);
 
   if (missingEnvVars.length > 0) {
-    console.error('Missing required environment variables:', missingEnvVars.join(', '));
-    process.exit(1);
+    throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
   }
 
   return {
-    plugins: [
-      react({
-        jsxRuntime: 'automatic',
-        jsxImportSource: '@emotion/react',
-        babel: {
-          plugins: [
-            ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }],
-            '@emotion/babel-plugin'
-          ]
-        }
-      }),
-      tsconfigPaths()
-    ],
+    plugins: [react()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
     define: {
-      'import.meta.env.VITE_DAILY_API_KEY': JSON.stringify(env.VITE_DAILY_API_KEY),
-      'import.meta.env.VITE_DAILY_DOMAIN': JSON.stringify(env.VITE_DAILY_DOMAIN),
-      'import.meta.env.MODE': JSON.stringify(mode),
-      'import.meta.env.DEV': mode === 'development',
-      'import.meta.env.PROD': mode === 'production',
-      __DEV__: mode === 'development',
-      __APP_ENV__: JSON.stringify(env.APP_ENV),
+      'process.env': {
+        ...env,
+        MODE: JSON.stringify(mode),
+        DEV: mode === 'development',
+        PROD: mode === 'production',
+      }
     },
     test: {
       globals: true,
@@ -62,19 +58,13 @@ export default defineConfig(({ command, mode }) => {
         ]
       }
     },
-    resolve: {
-      alias: {
-        '@': resolve(__dirname, './src'),
-      },
-      extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json'],
-    },
     build: {
       target: 'esnext',
       outDir: 'dist',
       sourcemap: true,
       rollupOptions: {
         input: {
-          main: resolve(process.cwd(), 'index.html'),
+          main: path.resolve(process.cwd(), 'index.html'),
         },
         output: {
           manualChunks: {

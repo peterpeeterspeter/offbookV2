@@ -1,31 +1,36 @@
-import { Link } from "react-router-dom";
+"use client";
+
+import React from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Mic, Sparkles, Users } from "lucide-react";
 
 export default function Home() {
+  const router = useRouter();
+
   return (
-    <main className="flex min-h-screen flex-col">
-      <section className="container py-24">
-        <div className="mx-auto flex max-w-[980px] flex-col items-center gap-4 text-center">
-          <h1 className="text-3xl font-bold leading-tight tracking-tighter md:text-5xl lg:text-6xl lg:leading-[1.1]">
-            Practice Your Lines with AI
-          </h1>
-          <p className="max-w-[750px] text-lg text-muted-foreground sm:text-xl">
-            Enhance your performance with real-time feedback, emotion analysis,
-            and collaborative practice sessions.
-          </p>
-          <div className="flex gap-4">
-            <Link to="/scripts">
-              <Button size="lg">Get Started</Button>
-            </Link>
-            <Link to="/practice">
-              <Button variant="outline" size="lg">
-                Try Demo
-              </Button>
-            </Link>
-          </div>
+    <main className="flex min-h-screen flex-col items-center justify-center p-24">
+      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
+        <h1 className="text-4xl font-bold mb-8">AI Actor Practice Platform</h1>
+        <p className="text-xl mb-8">
+          Practice acting with AI-powered scene partners
+        </p>
+        <div className="flex gap-4">
+          <Button
+            onClick={() => router.push("/practice")}
+            className="px-6 py-3"
+          >
+            Start Practice
+          </Button>
+          <Button
+            onClick={() => router.push("/scripts")}
+            variant="outline"
+            className="px-6 py-3"
+          >
+            Browse Scripts
+          </Button>
         </div>
-      </section>
+      </div>
 
       <section className="container py-24">
         <div className="grid gap-12 md:grid-cols-3">

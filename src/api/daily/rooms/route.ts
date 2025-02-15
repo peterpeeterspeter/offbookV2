@@ -18,8 +18,8 @@ interface CreateRoomResponse {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as CreateRoomParams
-    const apiKey = import.meta.env.VITE_DAILY_API_KEY
-    const domain = import.meta.env.VITE_DAILY_DOMAIN
+    const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY
+    const domain = process.env.NEXT_PUBLIC_DAILY_DOMAIN
 
     if (!apiKey || !domain) {
       return NextResponse.json(
@@ -85,7 +85,7 @@ export async function DELETE(request: Request) {
       )
     }
 
-    const apiKey = import.meta.env.VITE_DAILY_API_KEY
+    const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY
     if (!apiKey) {
       return NextResponse.json(
         { success: false, error: 'Missing Daily.co configuration' },
