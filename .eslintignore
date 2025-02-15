@@ -1,0 +1,8 @@
+dist
+.eslintrc.json
+**/*.d.ts
+src/backup/**/*
+src/lib/**/*
+src/components/ui/**/*
+src/app/api/**/*
+next.config.js
