@@ -89,6 +89,7 @@ export interface MonitoringConfig {
       ttfb: number
       audioLatency: number
       batteryDrain: number
+      successRate: number
     }
   }
   health: {

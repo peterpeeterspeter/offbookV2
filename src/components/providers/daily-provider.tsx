@@ -16,15 +16,8 @@ function HydrationFallback() {
   );
 }
 
-function validateEnvironment() {
-  const apiKey = import.meta.env.VITE_DAILY_API_KEY;
-  const domain = import.meta.env.VITE_DAILY_DOMAIN;
-
-  if (!apiKey) throw new Error("VITE_DAILY_API_KEY is not set in environment");
-  if (!domain) throw new Error("VITE_DAILY_DOMAIN is not set in environment");
-
-  return { apiKey, domain };
-}
+const apiKey = process.env.NEXT_PUBLIC_DAILY_API_KEY;
+const domain = process.env.NEXT_PUBLIC_DAILY_DOMAIN;
 
 export function DailyVideoProvider({ children }: DailyVideoProviderProps) {
   const [isConfigValid, setIsConfigValid] = useState(false);
@@ -32,7 +25,12 @@ export function DailyVideoProvider({ children }: DailyVideoProviderProps) {
 
   useEffect(() => {
     try {
-      validateEnvironment();
+      if (!apiKey) {
+        throw new Error("NEXT_PUBLIC_DAILY_API_KEY is not set in environment");
+      }
+      if (!domain) {
+        throw new Error("NEXT_PUBLIC_DAILY_DOMAIN is not set in environment");
+      }
       setIsConfigValid(true);
     } catch (err) {
       setError(

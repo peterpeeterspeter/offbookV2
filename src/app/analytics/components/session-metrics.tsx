@@ -3,7 +3,7 @@
 import { useMetrics } from "@/hooks/use-metrics";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export function SessionMetrics() {
+export default function SessionMetrics() {
   const { data, isLoading } = useMetrics();
 
   if (isLoading || !data) {

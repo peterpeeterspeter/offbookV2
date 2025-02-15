@@ -15,7 +15,7 @@ const TIME_RANGES = [
 
 type TimeRange = (typeof TIME_RANGES)[number];
 
-export function MetricsTimeRange() {
+export default function MetricsTimeRange() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>(TIME_RANGES[0]);
   const { mutate } = useMetrics({
     timeRange: {
