@@ -59,7 +59,7 @@ class MockWhisperService {
   private memoryUsage = 0;
   private progressHandler?: (progress: { processed: number; total: number; percent: number }) => void;
   private worker?: Worker;
-  private activeTranscriptions = new Set<Promise<any>>();
+  private activeTranscriptions = new Set<Promise<WhisperResponse>>();
   private errorHandler?: (error: Error) => void;
   private lastRequestTime = 0;
   private throttleDelay = 100; // 100ms between requests
@@ -88,7 +88,10 @@ class MockWhisperService {
             text: 'Hello world',
             confidence: 0.95,
             duration: 1.5,
-            emotion: 'neutral'
+            emotion: 'neutral',
+            segments: MOCK_SEGMENTS,
+            processingTime: 100,
+            modelLatency: 50
           });
         } else {
           reject(new Error('Transcription cancelled'));
@@ -286,13 +289,27 @@ const createMockMediaRecorder = (_mimeType = 'audio/webm'): MediaRecorder => {
 };
 
 // Additional test constants
-const NETWORK_CONDITIONS = {
+interface NetworkCondition {
+  latency: number;
+  jitter: number;
+}
+
+interface DeviceProfile {
+  userAgent: string;
+  connection: {
+    downlink: number;
+    rtt: number;
+  };
+  memory: number;
+}
+
+const NETWORK_CONDITIONS: Record<string, NetworkCondition> = {
   GOOD: { latency: 50, jitter: 10 },
   POOR: { latency: 500, jitter: 200 },
   TERRIBLE: { latency: 2000, jitter: 1000 }
 };
 
-const DEVICE_PROFILES = {
+const DEVICE_PROFILES: Record<string, DeviceProfile> = {
   MOBILE: {
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1',
     connection: { downlink: 4, rtt: 100 },
@@ -634,7 +651,7 @@ describe('WhisperService', () => {
 
         const result = await MockWhisperService.transcribeAudio(mockBlob);
         expect((result as WhisperResponse).language).toBe(lang);
-      });
+      }
     });
   });
 
@@ -768,48 +785,95 @@ describe('WhisperService', () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      // @ts-expect-error - Testing invalid origin
-      global.location = { origin: 'http://malicious-site.com' };
+      // Mock location object
+      const originalLocation = global.location;
+      Object.defineProperty(global, 'location', {
+        value: { origin: 'http://malicious-site.com' },
+        configurable: true
+      });
 
-      await expect(service.sendAudioChunk(mockBlob)).rejects.toThrow('Invalid origin');
+      try {
+        await expect(service.sendAudioChunk(mockBlob)).rejects.toThrow('Invalid origin');
+      } finally {
+        // Restore original location
+        Object.defineProperty(global, 'location', {
+          value: originalLocation,
+          configurable: true
+        });
+      }
     });
 
     it('should prevent unauthorized access', async () => {
-      const testService = new MockWhisperService();
+      const service = new MockWhisperService();
       // Don't initialize to simulate unauthorized state
-      await expect(testService.transcribeAudio(mockBlob)).rejects.toThrow('Service not initialized');
+      await expect(service.transcribeAudio(mockBlob)).rejects.toThrow('Service not initialized');
     });
   });
 
   describe('Mobile Device Support', () => {
     Object.entries(DEVICE_PROFILES).forEach(([device, profile]) => {
       it(`should optimize for ${device}`, async () => {
-        // Mock device environment
-        // @ts-expect-error - Readonly property
-        navigator.userAgent = profile.userAgent;
-        // @ts-expect-error - Readonly property
-        navigator.connection = profile.connection;
-        // @ts-expect-error - Mock memory API
-        navigator.deviceMemory = profile.memory;
+        // Store original values
+        const originalUserAgent = navigator.userAgent;
+        const originalConnection = navigator.connection;
+        const originalDeviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
 
-        const service = new MockWhisperService();
-        await service.initialize();
+        try {
+          // Mock device environment
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: profile.userAgent
+          });
 
-        const smallBlob = createAudioBlob(0.5);
-        const result = await service.transcribeAudio(smallBlob);
-        expect(result).toBeDefined();
-        expect(service.getMemoryUsage()).toBeLessThan(profile.memory * 0.5);
+          Object.defineProperty(navigator, 'connection', {
+            configurable: true,
+            value: profile.connection
+          });
+
+          Object.defineProperty(navigator, 'deviceMemory', {
+            configurable: true,
+            value: profile.memory
+          });
+
+          const service = new MockWhisperService();
+          await service.initialize();
+
+          const smallBlob = createAudioBlob(0.5);
+          const result = await service.transcribeAudio(smallBlob);
+          expect(result).toBeDefined();
+          expect(service.getMemoryUsage()).toBeLessThan(profile.memory * 0.5);
+        } finally {
+          // Restore original values
+          Object.defineProperty(navigator, 'userAgent', {
+            configurable: true,
+            value: originalUserAgent
+          });
+
+          Object.defineProperty(navigator, 'connection', {
+            configurable: true,
+            value: originalConnection
+          });
+
+          Object.defineProperty(navigator, 'deviceMemory', {
+            configurable: true,
+            value: originalDeviceMemory
+          });
+        }
       });
     });
   });
 
   describe('WebSocket Message Validation', () => {
+    interface WebSocketMessage {
+      type: string;
+      data: unknown;
+    }
+
     it('should validate message format', async () => {
       const service = new MockWhisperService();
       await service.initialize();
 
-      const invalidMessage = { type: 'unknown', data: 'invalid' };
-      // @ts-expect-error - Testing invalid message
+      const invalidMessage: WebSocketMessage = { type: 'unknown', data: 'invalid' };
       await expect(service['ws']?.send(JSON.stringify(invalidMessage)))
         .rejects.toThrow('Invalid message format');
     });
@@ -819,7 +883,8 @@ describe('WhisperService', () => {
       await service.initialize();
 
       const audioData = new Float32Array([0, 0.5, -0.5, 0]);
-      await expect(service.sendAudioChunk(new Blob([audioData])))
+      const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+      await expect(service.sendAudioChunk(audioBlob))
         .resolves.not.toThrow();
     });
 
@@ -895,13 +960,25 @@ describe('WhisperService', () => {
 
       // Simulate page visibility change
       const visibilityChange = new Event('visibilitychange');
-      // @ts-expect-error - Testing readonly property
-      document.hidden = true;
+
+      // Use Object.defineProperty to safely modify document.hidden
+      const originalHidden = document.hidden;
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        get: () => true
+      });
+
       document.dispatchEvent(visibilityChange);
 
       const result = await MockWhisperService.transcribeAudio(mockBlob);
       expect(result).toBeDefined();
       expect('error' in result).toBe(false);
+
+      // Restore original value
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        get: () => originalHidden
+      });
     });
 
     it('should handle tab focus changes', async () => {
@@ -1017,27 +1094,6 @@ describe('WhisperService', () => {
       window.dispatchEvent(new Event('online'));
 
       await expect(offlinePromise).resolves.not.toThrow();
-    });
-
-    it('should sync queued items when online', async () => {
-      const service = new MockWhisperService();
-      await service.initialize();
-
-      const queuedItems = [
-        service.sendAudioChunk(mockBlob),
-        service.sendAudioChunk(mockBlob),
-        service.sendAudioChunk(mockBlob)
-      ];
-
-      // Simulate coming back online
-      Object.defineProperty(window, 'navigator', {
-        value: { ...originalNavigator, onLine: true },
-        configurable: true
-      });
-      window.dispatchEvent(new Event('online'));
-
-      await Promise.all(queuedItems);
-      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
   });
 

@@ -3,6 +3,7 @@ import '@testing-library/jest-dom'
 import { Blob } from 'buffer'
 import { ReadableStream } from 'stream/web'
 import { TextEncoder, TextDecoder } from 'util'
+import type { CompressionFormat } from 'zlib'
 import {
   MockMediaRecorder as MediaRecorderImpl,
   MockMediaStream as MediaStreamImpl,
@@ -12,10 +13,55 @@ import {
 
 // Extend ProcessEnv interface
 declare global {
+  namespace NodeJS {
     interface ProcessEnv {
-      REACT_APP_DEEPSEEK_API_KEY: string
-      REACT_APP_ELEVENLABS_API_KEY: string
-    VITE_DAILY_API_KEY: string
+      REACT_APP_DEEPSEEK_API_KEY: string;
+      REACT_APP_ELEVENLABS_API_KEY: string;
+      VITE_DAILY_API_KEY: string;
+    }
+  }
+
+  // Extend Window interface with all mock implementations
+  interface Window {
+    AudioContext: typeof MockAudioContext;
+    webkitAudioContext: typeof MockAudioContext;
+    indexedDB: typeof mockIndexedDB;
+    localStorage: typeof localStorageMock;
+    MediaRecorder: typeof MediaRecorderImpl;
+    Worker: typeof WorkerMock;
+    BroadcastChannel: typeof BroadcastChannelMock;
+  }
+
+  // Global variable declarations
+  var MediaRecorder: typeof MediaRecorderImpl;
+  var AudioContext: typeof MockAudioContext;
+  var webkitAudioContext: typeof MockAudioContext;
+  var Worker: typeof WorkerMock;
+  var BroadcastChannel: typeof BroadcastChannelMock;
+
+  // Add proper interfaces for mock implementations
+  interface MockAudioContextOptions {
+    latencyHint?: AudioContextLatencyCategory | number;
+    sampleRate?: number;
+  }
+
+  interface MockMediaRecorderOptions {
+    mimeType?: string;
+    audioBitsPerSecond?: number;
+    videoBitsPerSecond?: number;
+    bitsPerSecond?: number;
+  }
+
+  interface MockBroadcastChannelEventMap {
+    message: MessageEvent;
+    messageerror: MessageEvent;
+  }
+
+  // Add proper type definitions for event handlers
+  interface MockEventTarget {
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
+    dispatchEvent(event: Event): boolean;
   }
 }
 
@@ -34,27 +80,50 @@ global.TextEncoder = TextEncoder
 global.TextDecoder = TextDecoder as typeof global.TextDecoder
 
 // Create a private symbol for the databases Map
-// const databasesSymbol = Symbol('databases');
+const databasesSymbol = Symbol('databases');
 
 // Mock IndexedDB with a simpler implementation
-const mockDatabases = new Map<string, any>();
+const mockDatabases = new Map<string, IDBDatabase>();
 
-// Helper to create and dispatch IDB events
-// const createIDBEvent = (type: string, target: any) => { ... }
-
-interface IDBRequest {
-  result: any;
+interface IDBRequest<T = any> {
+  result: T;
   error: Error | null;
   onsuccess: ((event: Event) => void) | null;
   onerror: ((event: Event) => void) | null;
+  readyState: 'pending' | 'done';
+  source: any;
+  transaction: IDBTransaction | null;
+}
+
+interface IDBObjectStore {
+  put: Mock;
+  get: Mock;
+  delete: Mock;
+  clear: Mock;
+  getAllKeys: Mock;
+}
+
+interface IDBTransaction {
+  objectStore: (name: string) => IDBObjectStore;
+  commit: () => void;
+  abort: () => void;
+  db: IDBDatabase;
+  error: DOMException | null;
+  mode: IDBTransactionMode;
+  objectStoreNames: DOMStringList;
+  onabort: ((this: IDBTransaction, ev: Event) => any) | null;
+  oncomplete: ((this: IDBTransaction, ev: Event) => any) | null;
+  onerror: ((this: IDBTransaction, ev: Event) => any) | null;
 }
 
 // Mock IndexedDB
 const mockIndexedDB = {
-  databases: new Map(),
-  open: vi.fn().mockImplementation((dbName: string): IDBRequest => {
-    mockDatabases.set(dbName, {});
-    const request: IDBRequest = {
+  databases: mockDatabases,
+  open: vi.fn().mockImplementation((dbName: string): IDBRequest<IDBDatabase> => {
+    const db = mockDatabases.get(dbName) ?? {};
+    mockDatabases.set(dbName, db);
+
+    const request: IDBRequest<IDBDatabase> = {
       result: {
         objectStoreNames: {
           contains: vi.fn().mockReturnValue(true),
@@ -76,28 +145,38 @@ const mockIndexedDB = {
           }),
           commit: vi.fn(),
           abort: vi.fn(),
+          db: db,
+          error: null,
+          mode: 'readwrite' as IDBTransactionMode,
+          objectStoreNames: { contains: vi.fn().mockReturnValue(true) } as DOMStringList,
+          onabort: null,
+          oncomplete: null,
+          onerror: null,
         }),
-      },
+      } as unknown as IDBDatabase,
       error: null,
       onsuccess: null,
       onerror: null,
+      readyState: 'pending',
+      source: null,
+      transaction: null
     };
-    setTimeout(() => request.onsuccess?.(new Event('success')), 0);
+
+    setTimeout(() => {
+      request.readyState = 'done';
+      request.onsuccess?.(new Event('success'));
+    }, 0);
+
     return request;
   }),
 };
-
-Object.defineProperty(window, 'indexedDB', {
-  value: mockIndexedDB,
-  writable: true,
-});
 
 // Mock localStorage
 const mockStorage = new Map<string, string>();
 
 const localStorageMock = {
-  getItem: vi.fn((key: string) => mockStorage.get(key) ?? null),
-  setItem: vi.fn((key: string, value: string) => mockStorage.set(key, value)),
+  getItem: vi.fn((key: string): string | null => mockStorage.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string): void => mockStorage.set(key, value)),
   removeItem: vi.fn((key: string) => mockStorage.delete(key)),
   clear: vi.fn(() => mockStorage.clear()),
   key: vi.fn((index: number) => Array.from(mockStorage.keys())[index] ?? null),
@@ -217,15 +296,36 @@ global.IntersectionObserver = vi.fn().mockImplementation(() => ({
 }))
 
 // Mock Web Worker
-class WorkerMock implements Worker {
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onmessageerror: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: ErrorEvent) => void) | null = null
-  postMessage = vi.fn()
-  terminate = vi.fn()
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-  dispatchEvent = vi.fn()
+class WorkerMock implements Partial<Worker> {
+  onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
+  onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
+  onerror: ((this: Worker, ev: ErrorEvent) => any) | null = null;
+
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions
+  ): void {
+    // Implementation
+  }
+
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions
+  ): void {
+    // Implementation
+  }
+
+  postMessage(message: any, transfer: Transferable[]): void;
+  postMessage(message: any, options?: StructuredSerializeOptions): void;
+  postMessage(message: any, options?: any): void {
+    // Implementation
+  }
+
+  terminate(): void {
+    // Implementation
+  }
 }
 global.Worker = WorkerMock as any
 
@@ -585,4 +685,39 @@ HTMLCanvasElement.prototype.getContext = vi.fn().mockImplementation((contextType
   }
   return null;
 });
+
+// Mock implementations with proper interfaces
+class BroadcastChannelMock implements Partial<BroadcastChannel> {
+  readonly name: string;
+  onmessage: ((this: BroadcastChannel, ev: MessageEvent) => any) | null = null;
+  onmessageerror: ((this: BroadcastChannel, ev: MessageEvent) => any) | null = null;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  postMessage(message: any): void {
+    // Implementation
+  }
+
+  close(): void {
+    // Implementation
+  }
+
+  addEventListener<K extends keyof MockBroadcastChannelEventMap>(
+    type: K,
+    listener: (this: BroadcastChannel, ev: MockBroadcastChannelEventMap[K]) => any,
+    options?: boolean | AddEventListenerOptions
+  ): void {
+    // Implementation
+  }
+
+  removeEventListener<K extends keyof MockBroadcastChannelEventMap>(
+    type: K,
+    listener: (this: BroadcastChannel, ev: MockBroadcastChannelEventMap[K]) => any,
+    options?: boolean | EventListenerOptions
+  ): void {
+    // Implementation
+  }
+}
 

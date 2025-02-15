@@ -338,3 +338,9 @@ function getEmotionColor(emotion: string): string {
       return "#d3d3d3";
   }
 }
+
+export const ForwardedEmotionHighlighter = React.forwardRef<
+  HTMLDivElement,
+  EmotionHighlighterProps
+>(EmotionHighlighter);
+ForwardedEmotionHighlighter.displayName = "ForwardedEmotionHighlighter";

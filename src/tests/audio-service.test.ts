@@ -22,62 +22,103 @@ Object.defineProperty(navigator, 'mediaDevices', {
   configurable: true
 });
 
-// Mock MediaRecorder with more complete implementation
-class MockMediaRecorder {
-  state: string = 'inactive';
-  ondataavailable: ((event: any) => void) | null = null;
-  onstop: (() => void) | null = null;
-  onerror: ((event: any) => void) | null = null;
+// Mock MediaRecorder with proper type implementation
+class MockMediaRecorder implements Partial<MediaRecorder> {
+  state: MediaRecorderState = 'inactive';
+  ondataavailable: ((event: BlobEvent) => void) | null = null;
+  onstop: ((this: MediaRecorder) => void) | null = null;
+  onerror: ((event: MediaRecorderErrorEvent) => void) | null = null;
   stream: MediaStream;
+  mimeType: string;
 
-  constructor(stream: MediaStream) {
+  constructor(stream: MediaStream, options?: { mimeType?: string }) {
     this.stream = stream;
+    this.mimeType = options?.mimeType || 'audio/webm';
   }
 
-  start(timeslice?: number) {
+  start(timeslice?: number): void {
     this.state = 'recording';
-    const handler = this.ondataavailable;
-    if (handler) {
-      // Simulate data available event
+    if (this.ondataavailable) {
       setTimeout(() => {
-        handler({ data: new Blob(['test audio data'], { type: 'audio/webm' }) });
+        const blob = new Blob(['test audio data'], { type: this.mimeType });
+        const event = new BlobEvent('dataavailable', { data: blob });
+        this.ondataavailable?.(event);
       }, timeslice || 100);
     }
   }
 
-  stop() {
+  stop(): void {
     this.state = 'inactive';
     if (this.onstop) {
-      this.onstop();
+      this.onstop.call(this);
     }
   }
 
-  pause() {
+  pause(): void {
     this.state = 'paused';
   }
 
-  resume() {
+  resume(): void {
     this.state = 'recording';
+  }
+
+  addEventListener<K extends keyof MediaRecorderEventMap>(
+    type: K,
+    listener: (this: MediaRecorder, ev: MediaRecorderEventMap[K]) => any,
+    options?: boolean | AddEventListenerOptions
+  ): void {
+    // Implementation
+  }
+
+  removeEventListener<K extends keyof MediaRecorderEventMap>(
+    type: K,
+    listener: (this: MediaRecorder, ev: MediaRecorderEventMap[K]) => any,
+    options?: boolean | EventListenerOptions
+  ): void {
+    // Implementation
+  }
+
+  dispatchEvent(event: Event): boolean {
+    return true;
   }
 }
 
-// @ts-expect-error - Mock MediaRecorder
-global.MediaRecorder = MockMediaRecorder;
+// Assign mock implementations to globals with proper type assertions
+global.MediaRecorder = MockMediaRecorder as unknown as typeof MediaRecorder;
 
-// Mock AudioContext
-class MockAudioContext {
+// Mock AudioContext with proper interface implementation
+class MockAudioContext implements Partial<AudioContext> {
   state: AudioContextState = 'suspended';
   sampleRate = 44100;
-  destination = {
-    channelCount: 2,
-    maxChannelCount: 2,
-    channelCountMode: 'explicit',
-    channelInterpretation: 'speakers'
-  };
+  destination: AudioDestinationNode;
+  baseLatency = 0;
+  audioWorklet: AudioWorklet;
+
+  constructor() {
+    this.destination = {
+      channelCount: 2,
+      maxChannelCount: 2,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers',
+      context: this,
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      connect: () => {},
+      disconnect: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => true
+    } as unknown as AudioDestinationNode;
+
+    this.audioWorklet = {
+      addModule: () => Promise.resolve()
+    } as unknown as AudioWorklet;
+  }
 
   createMediaStreamSource = vi.fn().mockReturnValue({
     connect: vi.fn(),
-    disconnect: vi.fn()
+    disconnect: vi.fn(),
+    context: this
   });
 
   createAnalyser = vi.fn().mockReturnValue({
@@ -86,7 +127,8 @@ class MockAudioContext {
     fftSize: 2048,
     frequencyBinCount: 1024,
     getByteFrequencyData: vi.fn(),
-    getFloatTimeDomainData: vi.fn()
+    getFloatTimeDomainData: vi.fn(),
+    context: this
   });
 
   resume = vi.fn().mockResolvedValue(undefined);
@@ -94,19 +136,17 @@ class MockAudioContext {
   close = vi.fn().mockResolvedValue(undefined);
 }
 
-// @ts-expect-error - Mock AudioContext
-global.AudioContext = MockAudioContext;
-// @ts-expect-error - Mock webkitAudioContext
-global.webkitAudioContext = MockAudioContext;
+// Assign mock implementations to globals with proper type assertions
+global.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+global.webkitAudioContext = MockAudioContext as unknown as typeof AudioContext;
 
 describe('AudioService', () => {
   const sessionId = 'test-session';
   let audioService: AudioServiceImpl;
 
   beforeEach(async () => {
-    // Reset singleton instance
-    // @ts-expect-error - Accessing private static for testing
-    AudioServiceImpl.instance = undefined;
+    // Reset singleton instance using a type assertion
+    (AudioServiceImpl as any).instance = undefined;
 
     mockGetUserMedia.mockResolvedValue({
       getAudioTracks: () => [{
@@ -187,12 +227,15 @@ describe('AudioService', () => {
 
   it('should handle errors during recording', async () => {
     await audioService.setup();
-    // @ts-expect-error - Mock MediaRecorder error
-    global.MediaRecorder = class {
+
+    // Mock MediaRecorder with error using proper typing
+    class ErrorMediaRecorder implements Partial<MediaRecorder> {
       constructor() {
         throw new Error('Recording failed');
       }
-    };
+    }
+    global.MediaRecorder = ErrorMediaRecorder as unknown as typeof MediaRecorder;
+
     await expect(audioService.startRecording(sessionId)).rejects.toThrow();
     const state = audioService.getState();
     expect(state.state).toBe(AudioServiceState.ERROR);
