@@ -9,7 +9,7 @@
     "plugin:@typescript-eslint/recommended",
     "prettier"
   ],
-  "ignorePatterns": ["dist", ".eslintrc.json", "**/*.d.ts"],
+  "ignorePatterns": ["dist", ".eslintrc.json", "**/*.d.ts", "src/backup/**/*"],
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
     "project": "./tsconfig.json"
@@ -17,18 +17,46 @@
   "plugins": ["@typescript-eslint"],
   "rules": {
     "@typescript-eslint/no-namespace": "off",
-    "@typescript-eslint/no-explicit-any": "off"
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "react-hooks/exhaustive-deps": "warn",
+    "@typescript-eslint/no-empty-interface": [
+      "error",
+      {
+        "allowSingleExtends": true
+      }
+    ]
   },
   "overrides": [
     {
-      "files": ["**/__tests__/**/*.[jt]s?(x)", "**/?(*.)+(spec|test).[jt]s?(x)", "jest.setup.ts", "jest.config.js", "scripts/**/*.js"],
+      "files": [
+        "**/__tests__/**/*.[jt]s?(x)",
+        "**/?(*.)+(spec|test).[jt]s?(x)",
+        "jest.setup.ts",
+        "jest.config.js",
+        "scripts/**/*.js"
+      ],
       "env": {
         "jest": true,
         "node": true
       },
       "rules": {
         "@typescript-eslint/no-var-requires": "off",
-        "@typescript-eslint/no-namespace": "off"
+        "@typescript-eslint/no-namespace": "off",
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": ["src/lib/**/*.[jt]s?(x)"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
       }
     }
   ],

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ScriptDetails } from "@/components/ScriptDetails";
+import ScriptDetails from "@/components/ScriptDetails";
 
 interface Props {
   params: {
