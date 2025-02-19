@@ -1,42 +1,75 @@
 import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { securityHeadersMiddleware } from './middleware/headers'
 import { rateLimitMiddleware } from './middleware/rate-limit'
 import { corsMiddleware } from './middleware/cors'
+import { getToken } from 'next-auth/jwt'
+
+// List of paths that don't require authentication
+const publicPaths = [
+  '/login',
+  '/register',
+  '/api/auth/signin',
+  '/api/auth/signout',
+  '/api/auth/session',
+  '/api/auth/csrf',
+  '/api/auth/providers',
+  '/api/auth/callback',
+  '/api/auth/_log',
+  '/practice',
+]
 
 export async function middleware(request: NextRequest) {
-  // Apply security headers to all requests
-  const response = securityHeadersMiddleware()
+  const { pathname } = request.nextUrl
 
-  // Apply CORS for API and WebSocket routes
-  if (request.nextUrl.pathname.startsWith('/api') || request.nextUrl.pathname.startsWith('/ws')) {
-    const corsResponse = corsMiddleware(request)
-    if (corsResponse.status !== 200) {
-      return corsResponse
-    }
+  // CORS headers for development
+  const response = NextResponse.next()
+  if (process.env.NODE_ENV === 'development') {
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    response.headers.set('Access-Control-Max-Age', '86400')
+  }
 
-    // Copy CORS headers to our response
-    corsResponse.headers.forEach((value, key) => {
-      if (key.toLowerCase().startsWith('access-control-')) {
-        response.headers.set(key, value)
-      }
+  // Handle preflight requests
+  if (request.method === 'OPTIONS') {
+    return response
+  }
+
+  // Check if the path is public
+  if (publicPaths.some(path => pathname.startsWith(path))) {
+    return response
+  }
+
+  try {
+    // Verify authentication
+    const token = await getToken({
+      req: request,
+      secret: process.env.NEXTAUTH_SECRET,
     })
-  }
 
-  // Apply rate limiting for API routes
-  if (request.nextUrl.pathname.startsWith('/api')) {
-    const rateLimitResponse = rateLimitMiddleware(request)
-    if (rateLimitResponse.status !== 200) {
-      return rateLimitResponse
+    // If no token and trying to access protected route, redirect to login
+    if (!token && !pathname.startsWith('/api/')) {
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('callbackUrl', pathname)
+      return NextResponse.redirect(loginUrl)
     }
-  }
 
-  return response
+    return response
+  } catch (error) {
+    console.error('Middleware error:', error)
+    return response
+  }
 }
 
 export const config = {
   matcher: [
-    '/:path*',
-    '/api/:path*',
-    '/ws/:path*'
+    /*
+     * Match all request paths except:
+     * 1. /_next/ (Next.js internals)
+     * 2. /static/ (static files)
+     * 3. /favicon.ico, /robots.txt (static files)
+     */
+    '/((?!_next/|static/|favicon.ico|robots.txt).*)',
   ]
 }

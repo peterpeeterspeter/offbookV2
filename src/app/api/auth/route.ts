@@ -12,8 +12,19 @@ const authService = new AuthService({
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { username, password } = body;
+    let username, password;
+    const contentType = request.headers.get('content-type');
+
+    // Handle both JSON and form-urlencoded data
+    if (contentType?.includes('application/json')) {
+      const body = await request.json();
+      username = body.username;
+      password = body.password;
+    } else if (contentType?.includes('application/x-www-form-urlencoded')) {
+      const formData = await request.formData();
+      username = formData.get('username');
+      password = formData.get('password');
+    }
 
     if (!username || !password) {
       return NextResponse.json(
@@ -64,8 +75,15 @@ export async function POST(request: Request) {
         maxAge: 7 * 24 * 60 * 60 // 7 days
       });
 
+      // Return response in NextAuth expected format
       return NextResponse.json({
-        user: authResponse.user
+        token: authResponse.token,
+        refreshToken: authResponse.refreshToken,
+        user: {
+          id: authResponse.user.id,
+          username: authResponse.user.username,
+          email: authResponse.user.email
+        }
       });
     } catch (error) {
       console.error('Authentication error:', error);

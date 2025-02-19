@@ -1,11 +1,18 @@
-/** @type {import('next').NextConfig} */
-const crypto = require("crypto");
+import { createHash } from "crypto";
 
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
   swcMinify: true,
+
+  // Configure server components and static optimization
+  experimental: {
+    serverActions: true,
+    optimizeCss: true,
+    scrollRestoration: true,
+  },
 
   // Security headers
   async headers() {
@@ -13,6 +20,28 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              process.env.NODE_ENV === "development"
+                ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; " +
+                  "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+                  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+                  "font-src 'self' data: https://fonts.gstatic.com; " +
+                  "img-src 'self' data: blob: https:; " +
+                  "media-src 'self' blob: https:; " +
+                  "connect-src 'self' https: ws: wss: data:; " +
+                  "frame-src 'self' https:; " +
+                  "worker-src 'self' blob:;"
+                : "default-src 'self'; " +
+                  "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+                  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+                  "font-src 'self' data: https://fonts.gstatic.com; " +
+                  "img-src 'self' data: https:; " +
+                  "media-src 'self' https:; " +
+                  "connect-src 'self' https:; " +
+                  "frame-src 'self';",
+          },
           {
             key: "X-DNS-Prefetch-Control",
             value: "on",
@@ -39,56 +68,17 @@ const nextConfig = {
           },
         ],
       },
-      {
-        source: "/api/monitoring/health",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "no-store, max-age=0",
-          },
-        ],
-      },
     ];
-  },
-
-  // Rate limiting
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/api/:path*",
-          has: [
-            {
-              type: "query",
-              key: "apikey",
-              value: process.env.API_KEY,
-            },
-          ],
-          destination: "/api/:path*",
-        },
-      ],
-    };
   },
 
   // Image optimization
   images: {
-    domains: ["offbook.app"],
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
-    imageSizes: [16, 32, 48, 64, 96, 128, 256],
-    formats: ["image/webp"],
-    minimumCacheTTL: 60,
+    unoptimized: true,
   },
 
   // Build optimization
   compiler: {
     removeConsole: process.env.NODE_ENV === "production",
-  },
-
-  // Performance optimization
-  experimental: {
-    optimizeCss: true,
-    scrollRestoration: true,
-    serverComponentsExternalPackages: [],
   },
 
   // Configure webpack
@@ -107,93 +97,21 @@ const nextConfig = {
       "@": "./src",
     };
 
-    // Production optimizations
-    if (process.env.NODE_ENV === "production") {
-      config.optimization = {
-        ...config.optimization,
-        minimize: true,
-        splitChunks: {
-          chunks: "all",
-          minSize: 20000,
-          maxSize: 244000,
-          minChunks: 1,
-          maxAsyncRequests: 30,
-          maxInitialRequests: 30,
-          cacheGroups: {
-            default: false,
-            vendors: false,
-            framework: {
-              chunks: "all",
-              name: "framework",
-              test: /(?<!node_modules.*)[\\/]node_modules[\\/](react|react-dom|scheduler|next)[\\/]/,
-              priority: 40,
-              enforce: true,
-            },
-            lib: {
-              test(module) {
-                return (
-                  module.size() > 160000 &&
-                  /node_modules[/\\]/.test(module.identifier())
-                );
-              },
-              name(module) {
-                const hash = crypto.createHash("sha1");
-                if (!module.identifier) return "vendor";
-                hash.update(module.identifier());
-                return hash.digest("hex").substring(0, 8);
-              },
-              priority: 30,
-              minChunks: 1,
-              reuseExistingChunk: true,
-            },
-            commons: {
-              name: "commons",
-              minChunks: 2,
-              priority: 20,
-            },
-            shared: {
-              name(module, chunks) {
-                if (!chunks || !chunks.length) return "shared";
-                const hash = crypto.createHash("sha1");
-                hash.update(
-                  chunks.reduce((acc, chunk) => acc + (chunk.name || ""), "")
-                );
-                return hash.digest("hex").substring(0, 8);
-              },
-              priority: 10,
-              minChunks: 2,
-              reuseExistingChunk: true,
-            },
-          },
-        },
-      };
-    }
-
     return config;
   },
 
-  // Temporarily disable type checking and linting during build
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // Disable favicon route generation
+  generateEtags: false,
+  generateBuildId: false,
 
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-
-  // Configure static generation
-  staticPageGenerationTimeout: 180,
-
-  // Configure page extensions
-  pageExtensions: ["ts", "tsx", "js", "jsx"],
-
-  // Configure runtime settings
-  serverRuntimeConfig: {
-    PROJECT_ROOT: __dirname,
-  },
-
-  publicRuntimeConfig: {
-    NODE_ENV: process.env.NODE_ENV,
+  // Route handling
+  async rewrites() {
+    return [
+      {
+        source: "/favicon.ico",
+        destination: "/public/favicon.ico",
+      },
+    ];
   },
 
   // Environment variables that should be exposed to the client
@@ -205,7 +123,19 @@ const nextConfig = {
       process.env.NEXT_PUBLIC_ERROR_REPORTING_URL,
     NEXT_PUBLIC_LOG_REMOTE_ENDPOINT:
       process.env.NEXT_PUBLIC_LOG_REMOTE_ENDPOINT,
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },
+
+  // Error handling during build
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
+  // Page configuration
+  pageExtensions: ["tsx", "ts", "jsx", "js"],
 };
 
-module.exports = nextConfig;
+export default nextConfig;

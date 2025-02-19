@@ -12,7 +12,7 @@ interface ProvidersProps {
   children: React.ReactNode;
 }
 
-function ErrorDisplay() {
+function ErrorDisplay({ error }: { error: Error }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
@@ -20,12 +20,22 @@ function ErrorDisplay() {
           Initialization Error
         </h1>
         <p className="text-gray-600 mb-4">
-          The application failed to initialize properly. This is likely due to
-          missing or invalid environment variables.
+          {error.message || "The application failed to initialize properly."}
         </p>
-        <p className="text-sm text-gray-500">
-          Please check the application logs for more details.
-        </p>
+        <div className="space-y-2">
+          <p className="text-sm text-gray-500">Please try the following:</p>
+          <ul className="list-disc list-inside text-sm text-gray-500">
+            <li>Refresh the page</li>
+            <li>Clear your browser cache</li>
+            <li>Check your internet connection</li>
+          </ul>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -37,34 +47,42 @@ export function Providers({ children }: ProvidersProps) {
 
   useEffect(() => {
     const init = async () => {
+      if (process.env.NODE_ENV === "development") {
+        setMounted(true);
+        return;
+      }
+
       try {
         await initializeApp();
         setMounted(true);
       } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
         logger.error({
           message: "Failed to initialize application",
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
         });
-        setError(err instanceof Error ? err : new Error(String(err)));
+        setError(error);
       }
     };
 
     init();
   }, []);
 
-  // Prevent flash of unstyled content
-  if (!mounted) {
+  // Show loading state
+  if (!mounted && !error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse">Initializing...</div>
+        <div className="animate-pulse text-gray-600">Initializing...</div>
       </div>
     );
   }
 
+  // Show error state
   if (error) {
-    return <ErrorDisplay />;
+    return <ErrorDisplay error={error} />;
   }
 
+  // Main application with providers
   return (
     <SessionProvider>
       <ThemeProvider

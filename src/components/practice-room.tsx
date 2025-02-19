@@ -39,6 +39,10 @@ export function PracticeRoom({ userName, onError }: PracticeRoomProps) {
     token: roomInfo?.token,
     userName,
     onError,
+    daily: {
+      apiKey: config.daily.apiKey,
+      domain: config.daily.domain,
+    },
     audioConfig: {
       sampleRate: config.audio.sampleRate,
       echoCancellation: config.audio.enableEchoCancellation,

@@ -1,102 +1,84 @@
 class AudioProcessor extends AudioWorkletProcessor {
-  constructor(options) {
+  constructor() {
     super();
-    this.sampleRate = options.processorOptions.sampleRate;
-    this.bufferSize = 2048;
-    this.noiseFloor = -60;
-    this.attackTime = 0.003;
-    this.releaseTime = 0.05;
-    this.threshold = -24;
-    this.ratio = 4;
-    this.makeupGain = 6;
+    this.effects = {
+      gain: 1.0,
+      echo: {
+        delay: 0.5,
+        feedback: 0.5,
+      },
+      reverb: 0.0,
+      filter: {
+        frequency: 1000,
+        Q: 1.0,
+        type: "lowpass",
+      },
+    };
 
-    this.lastGain = 1.0;
-    this.envelope = 0;
-    this.rmsHistory = new Float32Array(10);
-    this.rmsIndex = 0;
-  }
+    this.delayBuffer = new Float32Array(48000); // 1 second delay buffer at 48kHz
+    this.delayWriteIndex = 0;
+    this.delayReadIndex = 0;
 
-  calculateRMS(inputs) {
-    const input = inputs[0];
-    if (!input || !input.length) return 0;
-
-    let sum = 0;
-    for (let i = 0; i < input[0].length; i++) {
-      sum += input[0][i] * input[0][i];
-    }
-    const rms = Math.sqrt(sum / input[0].length);
-    
-    // Update RMS history
-    this.rmsHistory[this.rmsIndex] = rms;
-    this.rmsIndex = (this.rmsIndex + 1) % this.rmsHistory.length;
-
-    // Calculate smoothed RMS
-    let smoothedRMS = 0;
-    for (let i = 0; i < this.rmsHistory.length; i++) {
-      smoothedRMS += this.rmsHistory[i];
-    }
-    return smoothedRMS / this.rmsHistory.length;
+    this.port.onmessage = (event) => {
+      if (event.data.type === "updateEffects") {
+        this.effects = event.data.effects;
+      }
+    };
   }
 
   process(inputs, outputs, parameters) {
     const input = inputs[0];
     const output = outputs[0];
-    
-    if (!input || !input.length) return true;
 
-    const rms = this.calculateRMS(inputs);
-    const dbFS = 20 * Math.log10(rms);
+    if (!input || !output) return true;
 
-    // Noise gate
-    if (dbFS < this.noiseFloor) {
-      for (let channel = 0; channel < output.length; channel++) {
-        for (let i = 0; i < output[channel].length; i++) {
-          output[channel][i] = 0;
-        }
-      }
-      return true;
-    }
+    for (let channel = 0; channel < input.length; channel++) {
+      const inputChannel = input[channel];
+      const outputChannel = output[channel];
 
-    // Compressor
-    let gainReduction = 1.0;
-    if (dbFS > this.threshold) {
-      const dbOverThreshold = dbFS - this.threshold;
-      const compressionDb = dbOverThreshold - (dbOverThreshold / this.ratio);
-      gainReduction = Math.pow(10, -compressionDb / 20);
-    }
+      for (let i = 0; i < inputChannel.length; i++) {
+        // Apply gain
+        let sample = inputChannel[i] * this.effects.gain;
 
-    // Envelope follower
-    const attackCoeff = Math.exp(-1 / (this.sampleRate * this.attackTime));
-    const releaseCoeff = Math.exp(-1 / (this.sampleRate * this.releaseTime));
-
-    for (let channel = 0; channel < output.length; channel++) {
-      for (let i = 0; i < output[channel].length; i++) {
-        // Update envelope
-        if (gainReduction < this.envelope) {
-          this.envelope = attackCoeff * (this.envelope - gainReduction) + gainReduction;
-        } else {
-          this.envelope = releaseCoeff * (this.envelope - gainReduction) + gainReduction;
+        // Apply echo
+        const delayTime = Math.floor(this.effects.echo.delay * sampleRate);
+        this.delayReadIndex = this.delayWriteIndex - delayTime;
+        if (this.delayReadIndex < 0) {
+          this.delayReadIndex += this.delayBuffer.length;
         }
 
-        // Apply envelope and makeup gain
-        const makeupLinear = Math.pow(10, this.makeupGain / 20);
-        output[channel][i] = input[channel][i] * this.envelope * makeupLinear;
+        sample +=
+          this.delayBuffer[this.delayReadIndex] * this.effects.echo.feedback;
+        this.delayBuffer[this.delayWriteIndex] = sample;
+
+        this.delayWriteIndex =
+          (this.delayWriteIndex + 1) % this.delayBuffer.length;
+
+        // Apply reverb (simple implementation)
+        if (this.effects.reverb > 0) {
+          const reverbDelay = Math.floor(0.1 * sampleRate); // 100ms reverb
+          const reverbIndex =
+            (this.delayWriteIndex - reverbDelay + this.delayBuffer.length) %
+            this.delayBuffer.length;
+          sample += this.delayBuffer[reverbIndex] * this.effects.reverb;
+        }
+
+        // Apply filter
+        if (this.effects.filter.type === "lowpass") {
+          const rc = 1.0 / (2.0 * Math.PI * this.effects.filter.frequency);
+          const dt = 1.0 / sampleRate;
+          const alpha = dt / (rc + dt);
+          sample =
+            sample * alpha +
+            (i > 0 ? outputChannel[i - 1] : sample) * (1.0 - alpha);
+        }
+
+        outputChannel[i] = Math.max(-1, Math.min(1, sample));
       }
     }
-
-    // Send metrics to main thread
-    this.port.postMessage({
-      type: 'metrics',
-      data: {
-        rms: rms,
-        dbFS: dbFS,
-        gainReduction: 20 * Math.log10(this.envelope),
-        isActive: dbFS > this.noiseFloor
-      }
-    });
 
     return true;
   }
 }
 
-registerProcessor('audio-processor', AudioProcessor); 
+registerProcessor("audio-processor", AudioProcessor);

@@ -1,11 +1,14 @@
+"use client";
+
 import { useEffect, useState, type ReactNode } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface HydrationFallbackProps {
   children: ReactNode;
 }
 
 export function HydrationFallback({ children }: HydrationFallbackProps) {
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -14,7 +17,7 @@ export function HydrationFallback({ children }: HydrationFallbackProps) {
   if (!isHydrated) {
     return (
       <div className="flex items-center justify-center min-h-[200px]">
-        <p className="text-gray-500">Loading content...</p>
+        <Skeleton className="h-32 w-full" />
       </div>
     );
   }

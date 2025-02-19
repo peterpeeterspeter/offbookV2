@@ -82,10 +82,10 @@ export default defineConfig(({ mode }) => {
       force: true,
     },
     server: {
-      port: 3000,
+      port: 5173,
       strictPort: true,
       host: true,
-      open: true,
+      open: false,
       cors: true,
       hmr: {
         protocol: 'ws',
@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     preview: {
-      port: 3000,
+      port: 5174,
       strictPort: true,
       host: 'localhost',
     },
