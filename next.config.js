@@ -9,7 +9,6 @@ const nextConfig = {
 
   // Configure server components and static optimization
   experimental: {
-    serverActions: true,
     optimizeCss: true,
     scrollRestoration: true,
   },
@@ -100,9 +99,16 @@ const nextConfig = {
     return config;
   },
 
+  // Build ID generation
+  generateBuildId: () => {
+    return createHash("md5")
+      .update(process.env.NODE_ENV + Date.now().toString())
+      .digest("hex")
+      .slice(0, 8);
+  },
+
   // Disable favicon route generation
   generateEtags: false,
-  generateBuildId: false,
 
   // Route handling
   async rewrites() {
