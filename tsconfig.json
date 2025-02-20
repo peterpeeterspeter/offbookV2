@@ -2,10 +2,7 @@
   "compilerOptions": {
     "target": "es2017",
     "module": "commonjs",
-    "lib": [
-      "es2017",
-      "dom"
-    ],
+    "lib": ["es2017", "dom"],
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -17,11 +14,9 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "moduleResolution": "node",
-    "baseUrl": "./",
+    "baseUrl": ".",
     "paths": {
-      "*": [
-        "node_modules/*"
-      ]
+      "@/*": ["src/*"]
     },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -41,12 +36,6 @@
       }
     ]
   },
-  "include": [
-    "src/**/*",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "**/*.spec.ts"
-  ]
+  "include": ["src/**/*", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "**/*.spec.ts"]
 }
