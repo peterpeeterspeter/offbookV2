@@ -16,7 +16,9 @@
     "moduleResolution": "node",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@/components/*": ["src/components/*"],
+      "@/providers": ["src/components/providers/index.tsx"]
     },
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

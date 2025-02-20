@@ -1,83 +1,26 @@
-import { createHash } from "crypto";
+const path = require("path");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
-  swcMinify: true,
 
-  // Configure server components and static optimization
-  experimental: {
-    optimizeCss: true,
-    scrollRestoration: true,
-  },
+  // Built-in optimizations
+  optimizeFonts: true,
 
-  // Security headers
-  async headers() {
+  // Disable static optimization for specific routes
+  rewrites: async () => {
     return [
       {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Content-Security-Policy",
-            value:
-              process.env.NODE_ENV === "development"
-                ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; " +
-                  "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-                  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-                  "font-src 'self' data: https://fonts.gstatic.com; " +
-                  "img-src 'self' data: blob: https:; " +
-                  "media-src 'self' blob: https:; " +
-                  "connect-src 'self' https: ws: wss: data:; " +
-                  "frame-src 'self' https:; " +
-                  "worker-src 'self' blob:;"
-                : "default-src 'self'; " +
-                  "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-                  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-                  "font-src 'self' data: https://fonts.gstatic.com; " +
-                  "img-src 'self' data: https:; " +
-                  "media-src 'self' https:; " +
-                  "connect-src 'self' https:; " +
-                  "frame-src 'self';",
-          },
-          {
-            key: "X-DNS-Prefetch-Control",
-            value: "on",
-          },
-          {
-            key: "Strict-Transport-Security",
-            value: "max-age=31536000; includeSubDomains",
-          },
-          {
-            key: "X-Frame-Options",
-            value: "SAMEORIGIN",
-          },
-          {
-            key: "X-Content-Type-Options",
-            value: "nosniff",
-          },
-          {
-            key: "Referrer-Policy",
-            value: "origin-when-cross-origin",
-          },
-          {
-            key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
-          },
-        ],
+        source: "/not-found",
+        destination: "/404",
+      },
+      {
+        source: "/favicon.ico",
+        destination: "/public/favicon.ico",
       },
     ];
-  },
-
-  // Image optimization
-  images: {
-    unoptimized: true,
-  },
-
-  // Build optimization
-  compiler: {
-    removeConsole: process.env.NODE_ENV === "production",
   },
 
   // Configure webpack
@@ -93,31 +36,10 @@ const nextConfig = {
 
     config.resolve.alias = {
       ...config.resolve.alias,
-      "@": "./src",
+      "@": path.join(process.cwd(), "src"),
     };
 
     return config;
-  },
-
-  // Build ID generation
-  generateBuildId: () => {
-    return createHash("md5")
-      .update(process.env.NODE_ENV + Date.now().toString())
-      .digest("hex")
-      .slice(0, 8);
-  },
-
-  // Disable favicon route generation
-  generateEtags: false,
-
-  // Route handling
-  async rewrites() {
-    return [
-      {
-        source: "/favicon.ico",
-        destination: "/public/favicon.ico",
-      },
-    ];
   },
 
   // Environment variables that should be exposed to the client
@@ -142,6 +64,10 @@ const nextConfig = {
 
   // Page configuration
   pageExtensions: ["tsx", "ts", "jsx", "js"],
+  trailingSlash: false,
+  generateBuildId: () => {
+    return "build-" + Date.now();
+  },
 };
 
-export default nextConfig;
+module.exports = nextConfig;

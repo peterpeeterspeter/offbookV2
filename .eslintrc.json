@@ -1,68 +1,43 @@
 {
-  "root": true,
-  "env": {
-    "browser": true,
-    "es2020": true
-  },
   "extends": [
     "next/core-web-vitals",
-    "plugin:@typescript-eslint/recommended",
-    "prettier"
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
   ],
-  "ignorePatterns": ["dist", ".eslintrc.json", "**/*.d.ts", "src/backup/**/*"],
   "parser": "@typescript-eslint/parser",
-  "parserOptions": {
-    "project": "./tsconfig.json"
-  },
   "plugins": ["@typescript-eslint"],
+  "root": true,
   "rules": {
-    "@typescript-eslint/no-namespace": "off",
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      {
-        "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_",
-        "ignoreRestSiblings": true
-      }
-    ],
-    "react-hooks/exhaustive-deps": "warn",
-    "@typescript-eslint/no-empty-interface": [
-      "error",
-      {
-        "allowSingleExtends": true
-      }
-    ]
+    "@typescript-eslint/no-unused-vars": "error",
+    "@typescript-eslint/no-explicit-any": "warn",
+    "no-console": ["warn", { "allow": ["warn", "error"] }]
   },
   "overrides": [
     {
-      "files": [
-        "**/__tests__/**/*.[jt]s?(x)",
-        "**/?(*.)+(spec|test).[jt]s?(x)",
-        "jest.setup.ts",
-        "jest.config.js",
-        "scripts/**/*.js"
-      ],
-      "env": {
-        "jest": true,
-        "node": true
-      },
+      "files": ["*.js", "*.cjs"],
       "rules": {
-        "@typescript-eslint/no-var-requires": "off",
-        "@typescript-eslint/no-namespace": "off",
-        "@typescript-eslint/no-explicit-any": "off"
+        "@typescript-eslint/no-var-requires": "off"
       }
     },
     {
-      "files": ["src/lib/**/*.[jt]s?(x)"],
+      "files": ["next.config.js", "next.config.cjs"],
       "rules": {
-        "@typescript-eslint/no-explicit-any": "off"
+        "@typescript-eslint/no-var-requires": "off",
+        "no-undef": "off"
       }
     }
   ],
   "settings": {
-    "react": {
-      "version": "detect"
+    "next": {
+      "rootDir": "."
     }
-  }
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    ".next/",
+    "out/",
+    "public/",
+    "*.config.js",
+    "*.config.cjs"
+  ]
 }
