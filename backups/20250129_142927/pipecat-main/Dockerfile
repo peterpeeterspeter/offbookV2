@@ -1,5 +1,5 @@
 # setup
-FROM python:3.11.5
+FROM python:3.14.0rc1
 
 WORKDIR /app
 COPY requirements.txt /app
