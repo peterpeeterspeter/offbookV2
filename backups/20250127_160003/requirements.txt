@@ -29,7 +29,7 @@ loguru>=0.7.0
 
 # Web framework
 websockets>=11.0.0
-python-multipart>=0.0.6
+python-multipart>=0.0.22
 
 # Database
 supabase>=1.0.0
